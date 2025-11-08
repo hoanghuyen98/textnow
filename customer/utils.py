@@ -7,6 +7,39 @@ except Exception:
     HAS_CONVERTER = False
 
 
+def normalize_phone_number(raw_number: str):
+    """
+    Chuẩn hóa số điện thoại người nhận từ các định dạng khác nhau.
+    Ví dụ:
+        (629) 234-3458 → to_number=16292343458, name=(629) 234-3458
+        6292343458     → to_number=16292343458, name=(629) 234-3458
+        16292343458    → to_number=16292343458, name=(629) 234-3458
+    """
+    if not raw_number:
+        return None, None
+
+    # 🔹 Lấy toàn bộ chữ số (loại bỏ (), -, space, ...)
+    digits = re.sub(r'\D', '', raw_number)
+
+    # 🔹 Kiểm tra độ dài hợp lệ
+    if len(digits) == 10:
+        # Thiếu số 1 ở đầu → thêm vào
+        digits = '1' + digits
+    elif len(digits) == 11 and digits.startswith('1'):
+        # Đã hợp lệ → giữ nguyên
+        pass
+    else:
+        # Không hợp lệ
+        return None, None
+
+    # 🔹 Tạo chuỗi name dạng (AAA) BBB-CCCC
+    area = digits[1:4]
+    mid = digits[4:7]
+    last = digits[7:]
+    name = f"({area}) {mid}-{last}"
+
+    return digits, name
+
 def strip_proxy(c: str) -> str:
     """
     Xoá phần `--proxy` và ký tự '\' ngay trước nó trong chuỗi curl.
@@ -80,7 +113,6 @@ def run_curl(curl_text):
         body = resp.json()
     except Exception:
         body = resp.text
-
     return {"status": resp.status_code, "headers": dict(resp.headers), "body": body}
 
 
@@ -90,6 +122,7 @@ def send_pinger_message(
     text: str = "",
     media_url: str = None,
     link_url: str = None,
+    name: str = None,
 ):
     """
     Gửi tin nhắn qua API Pinger (/2.2/message).
@@ -113,9 +146,9 @@ def send_pinger_message(
         body = {}
 
     # --- Ghi đè nội dung gửi
-    body["text"] = text or "📸 Ảnh được gửi từ người dùng"
+    body["text"] = text or " "
     body["to"] = [{
-        "name": f"({to_number[:3]}) {to_number[3:6]}-{to_number[6:]}",
+        "name": name,
         "TN": to_number
     }]
 
@@ -127,8 +160,9 @@ def send_pinger_message(
     # --- Gửi request thực
     try:
         resp = requests.post(msg_url, headers=headers, json=body, timeout=30)
+        print('resp: ', resp)
     except requests.RequestException as e:
-        return {"success": False, "error_type": "network_error", "message": str(e)}
+        return {"status": "error", "message": f"network_error {str(e)}"}
 
     # --- Xử lý kết quả trả về
     try:
@@ -141,11 +175,9 @@ def send_pinger_message(
     if isinstance(result, dict) and "errNo" in result:
         print("????????")
         return {
-            "success": False,
+            "status": "error",
             "status_code": resp.status_code,
-            "errNo": result.get("errNo"),
-            "errMsg": result.get("errMsg"),
-            "retry": result.get("retry"),
+            "message": result.get("errMsg"),
             "response": result,
             "body_sent": body,
         }
@@ -154,17 +186,18 @@ def send_pinger_message(
     if resp.status_code >= 400:
         print("tttttt")
         return {
-            "success": False,
+            "status": "error",
             "status_code": resp.status_code,
-            "errMsg": f"HTTP Error {resp.status_code}",
+            "message": f"HTTP Error {resp.status_code}",
             "response": result,
             "body_sent": body,
         }
 
     # --- Thành công ---
     return {
-        "success": True,
+        "status": "status",
         "status_code": resp.status_code,
         "response": result,
+        "message": "Gửi ảnh thành công",
         "body_sent": body,
     }

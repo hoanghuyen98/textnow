@@ -2,28 +2,55 @@ from django.contrib import admin
 from django.urls import include, path
 from django.conf import settings
 from django.conf.urls.static import static
+from rest_framework.routers import DefaultRouter
 from rest_framework_simplejwt.views import (
     TokenObtainPairView,  # login
     TokenRefreshView,     # refresh token
+
 )
 from . import views
 
+router = DefaultRouter()
+
+router.register(r'employee_group', views.EmployeeGroupViewSet, basename='employee_group')
+router.register(r'employees', views.EmployeeViewSet, basename='employee')
+router.register(r"customers", views.CustomerViewSet, basename="customer")
+router.register(r"purchased-mails", views.PurchasedMailViewSet, basename="purchased-mail")
+
 urlpatterns = [
+
+    path("check_status/", views.CheckStatusView.as_view(), name="check_status"),
+    # Message
     path('', views.customer_home, name='chat_home'),
-    path('refresh_inbox/', views.refresh_inbox, name='refresh_inbox'),
-    path('send_message/', views.send_message, name='send_message'),
-    path("send_media/", views.send_media_api, name="send_media_api"),
+    path('refresh_inbox/', views.RefreshInboxView.as_view(), name='refresh_inbox'),
+    path('send_message/', views.SendMessageView.as_view(), name='send_message'),
+    path("send_media/", views.SendMediaView.as_view(), name="send_media_api"),
   
     # nhân viên
-    path("phone_add/", views.create_phone_account, name="create_phone"),
+    path("phone_add/",  views.CreatePhoneAccountView.as_view(), name="create_phone"),
+    path("employee_phone_summary/", views.EmployeePhoneSummaryView.as_view(), name="employee_phone_summary"),
 
     # khách hàng
-    path("customer_info/", views.customer_info, name="customer_info"),
+    path('customer_info/',views.CustomerInfoView.as_view(), name='customer_info'),
+
 
     # login/logout
-    path('login/', TokenObtainPairView.as_view(), name='token_obtain_pair'),
-    path('token/refresh/', TokenRefreshView.as_view(), name='token_refresh'),
-    path('logout/', views.logout_view, name='logout'),
-]
+    path("login/", views.CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
+    path("token/refresh/", views.CustomTokenRefreshView.as_view(), name="token_refresh"),
+    path('logout/', views.LogoutView.as_view(), name='logout'),
+
+    # Mail 
+    path("mail_categories/", views.MailCategoriesView.as_view(), name="mail_categories"),
+    path("buy_mail/", views.BuyMailView.as_view(), name="buy_mail"),
+    path("get_auth_code/", views.GetAuthCodeView.as_view(), name="get_auth_code"),
+    path("purchased_mails/", views.ListPurchasedMailsView.as_view(), name="purchased_mails"),
+    path("save_apple_mail/", views.SaveAppleMailView.as_view(), name="save_apple_mail"),
+    path("save_textnow/", views.SaveTextNowAccountView.as_view(), name="save_textnow"),
+
+    # thống kê
+    path("summary_day/", views.PhoneReportView.as_view(), name="phone_summary_day"),
+
+] + router.urls
+
 if settings.DEBUG:
     urlpatterns += static(settings.MEDIA_URL, document_root=settings.MEDIA_ROOT)

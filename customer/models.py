@@ -9,22 +9,23 @@ class Customer(models.Model):
         on_delete=models.CASCADE,
         related_name="customer_profile"
     )
-
-    company_name = models.CharField(max_length=255, blank=True, null=True)
-    address = models.CharField(max_length=255, blank=True, null=True)
-    status = models.CharField(
-        max_length=20,
-        choices=[
-            ('active', 'Đang hoạt động'),
-            ('inactive', 'Ngưng hoạt động'),
-            ('blacklist', 'Danh sách đen'),
-        ],
-        default='active'
-    )
+    raw_password = models.TextField(blank=True, null=True)
+    phone_assigned_count = models.PositiveIntegerField(default=0)
 
     def __str__(self):
-        return f"{self.user.username} ({self.company_name or 'Cá nhân'})"
-        
+        return f"{self.user.username}"
+
+    def delete(self, *args, **kwargs):
+        if self.user:
+            self.user.delete()
+        super().delete(*args, **kwargs)
+
+class EmployeeGroup(models.Model):
+    name = models.CharField(max_length=100)
+
+    def __str__(self):
+        return self.name
+
 
 class Employee(models.Model):
     user = models.OneToOneField(
@@ -32,32 +33,34 @@ class Employee(models.Model):
         on_delete=models.CASCADE,
         related_name="employee_profile"
     )
-
-    department = models.CharField(max_length=100, null=True, blank=True)
     role = models.CharField(
         max_length=50,
         choices=[
             ('admin', 'Quản trị viên'),
             ('staff', 'Nhân viên'),
-            ('manager', 'Trưởng nhóm'),
         ],
         default='staff'
     )
+    group = models.ForeignKey(
+        EmployeeGroup, on_delete=models.SET_NULL,
+        null=True, blank=True, related_name="employees"
+    )
 
+    raw_password = models.TextField(blank=True, null=True)
     def __str__(self):
         return f"{self.user.username} ({self.role})"
 
+
+    def delete(self, *args, **kwargs):
+        if self.user:
+            self.user.delete()
+        super().delete(*args, **kwargs)
+
 class PhoneAccount(models.Model):
-    PROVIDER_CHOICES = [
-        ("pinger", "Pinger"),
-        ("textnow", "TextNow"),
-        ("sideline", "Sideline"),
-        ("googlevoice", "Google Voice"),
-        ("other", "Other"),
-    ]
 
     STATUS_CHOICES = [
         ("live", "Live"),
+        ("die_use", "Dead (When In Use)"),
         ("lock", "Locked"),
         ("die", "Dead"),
     ]
@@ -80,9 +83,9 @@ class PhoneAccount(models.Model):
     name = models.CharField(max_length=20, null=True)
     phone = models.CharField(max_length=20, unique=True, db_index=True)
     mail = models.EmailField(blank=True, null=True)
-    provider = models.CharField(max_length=30, choices=PROVIDER_CHOICES, default="pinger")
+    provider = models.CharField(max_length=30, null=True, blank=True)
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="live")
-
+    is_used = models.BooleanField(default=False)
     # --- Lưu nội dung curl ---
     batch = models.TextField(blank=True, null=True)
     message = models.TextField(blank=True, null=True)
@@ -96,14 +99,85 @@ class PhoneAccount(models.Model):
         ordering = ["phone"]
 
     def __str__(self):
-        return f"{self.phone} ({self.get_provider_display()} - {self.get_status_display()})"
+        return f"{self.phone}"
 
-    # Tự động cập nhật hash trước khi lưu
-    def save(self, *args, **kwargs):
-        def hash_text(text):
-            return hashlib.sha256(text.strip().encode("utf-8")).hexdigest() if text else None
 
-        self.batch_hash = hash_text(self.batch)
-        self.message_hash = hash_text(self.message)
-        self.media_hash = hash_text(self.media)
-        super().save(*args, **kwargs)
+class MailProvider(models.Model):
+    name = models.CharField(max_length=100, unique=True,  null=True, blank=True)
+    base_url = models.URLField()
+    api_key = models.CharField(max_length=255)
+    def __str__(self): return self.name
+
+
+class MailTransaction(models.Model):
+    provider = models.ForeignKey(MailProvider, on_delete=models.PROTECT,  null=True, blank=True)
+    employee = models.ForeignKey(Employee, on_delete=models.SET_NULL, null=True, blank=True)
+    product_id = models.CharField(max_length=50, null=True, blank=True)
+    product_name = models.CharField(max_length=255, null=True, blank=True)
+    quantity = models.PositiveIntegerField(default=1)
+    total_price = models.DecimalField(max_digits=12, decimal_places=2, null=True, blank=True)
+    trans_id = models.CharField(max_length=100, blank=True, null=True)
+    status = models.CharField(max_length=20, default="success")
+    raw_response = models.JSONField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True)
+    
+    def __str__(self): return f"{self.provider} - {self.product_name} ({self.quantity})"
+
+
+class PurchasedMail(models.Model):
+    purchase = models.ForeignKey(
+        MailTransaction, on_delete=models.CASCADE, related_name="mails", blank=True, null=True
+    )
+    email = models.EmailField(blank=True, null=True)
+    password = models.CharField(max_length=255, blank=True, null=True)
+    refresh_token = models.TextField(blank=True, null=True)
+    client_id = models.CharField(max_length=100, blank=True, null=True)
+    provider = models.CharField(max_length=50, blank=True, null=True)
+    is_used = models.BooleanField(default=False)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    class Meta:
+        unique_together = ("purchase", "email")
+        db_table = "purchased_mail"
+
+    def __str__(self):
+        return f"{self.email} ({self.provider or 'unknown'})"
+
+
+class AppleMailProxy(models.Model):
+    employee = models.ForeignKey(
+        "Employee", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="apple_mail_entries"
+    )
+    mail = models.EmailField(unique=True)
+    proxy_ip = models.GenericIPAddressField(protocol="both", unpack_ipv4=True)
+    note = models.CharField(max_length=255, blank=True, null=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+    class Meta:
+        db_table = "apple_mail_proxy"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.mail} ({self.proxy_ip})"
+
+class TextNowAccount(models.Model):
+    employee = models.ForeignKey(
+        "Employee", on_delete=models.SET_NULL, null=True, blank=True,
+        related_name="textnow_accounts"
+    )
+    email = models.EmailField(unique=True)
+    password = models.CharField(max_length=255)
+    is_active = models.BooleanField(default=True)
+
+    created_at = models.DateTimeField(auto_now_add=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "textnow_account"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"{self.email}"

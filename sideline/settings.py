@@ -13,6 +13,8 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 
 from pathlib import Path
 from datetime import timedelta
+from dotenv import load_dotenv
+load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
 
@@ -21,7 +23,7 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 # See https://docs.djangoproject.com/en/5.2/howto/deployment/checklist/
 
 # SECURITY WARNING: keep the secret key used in production secret!
-SECRET_KEY = 'django-insecure-97@7qqje=$3f)%t)lkt(#03j25#i#+hh-2+zb*la$w9$6z68i1'
+SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-97@7qqje=$3f)%t)lkt(#03j25#i#+hh-2+zb*la$w9$6z68i1')
 
 # SECURITY WARNING: don't run with debug turned on in production!
 DEBUG = True
@@ -39,6 +41,7 @@ INSTALLED_APPS = [
     'django.contrib.messages',
     'django.contrib.staticfiles',
     'rest_framework',
+    'drf_yasg',
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
@@ -47,8 +50,9 @@ INSTALLED_APPS = [
 
 MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
-    'django.contrib.sessions.middleware.SessionMiddleware',
     'corsheaders.middleware.CorsMiddleware',
+    'django.contrib.sessions.middleware.SessionMiddleware',
+    
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -67,17 +71,20 @@ ROOT_URLCONF = 'sideline.urls'
 # ✅ Chỉ định rõ domain frontend
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # frontend dev
-    "https://synecologic-unperipherally-ethel.ngrok-free.dev",  # nếu bạn gọi giữa các ngrok hoặc reverse proxy
+    "https://divisibly-pelagic-roosevelt.ngrok-free.dev",  # nếu bạn gọi giữa các ngrok hoặc reverse proxy
+    "https://phonechatfrontend.vercel.app",
 ]
-
+CORS_ALLOWED_ORIGIN_REGEXES = [
+    r"^https://.*\.ngrok-free\.dev$",
+]
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=15),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=200),
     'REFRESH_TOKEN_LIFETIME': timedelta(days=3),
 }
 
 # ✅ Cho phép gửi cookie / header Authorization
 CORS_ALLOW_CREDENTIALS = True
-
+CORS_ALLOW_ALL_ORIGINS = True
 # ✅ Cho phép một số header cụ thể
 CORS_ALLOW_HEADERS = [
     "accept",
@@ -89,7 +96,8 @@ CORS_ALLOW_HEADERS = [
     "user-agent",
     "x-csrftoken",
     "x-requested-with",
-    "x-timezone",          # 👈 thêm dòng này
+    "x-timezone",       
+    
 ]
 
 TEMPLATES = [
@@ -110,11 +118,18 @@ TEMPLATES = [
 WSGI_APPLICATION = 'sideline.wsgi.application'
 CORS_ALLOW_CREDENTIALS = True
 CSRF_TRUSTED_ORIGINS = [
-    "https://synecologic-unperipherally-ethel.ngrok-free.dev",  # 👈 bắt buộc có https://
+    "https://divisibly-pelagic-roosevelt.ngrok-free.dev",  # 👈 bắt buộc có https://
+    "https://phonechatfrontend.vercel.app",
 ]
 
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
+
+CELERY_BROKER_URL = os.environ.get('CELERY_BROKER_URL')
+CELERY_RESULT_BACKEND = CELERY_BROKER_URL
+CELERY_ACCEPT_CONTENT = ['json']
+CELERY_TASK_SERIALIZER = 'json'
+CELERY_RESULT_SERIALIZER = 'json'
 
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
@@ -123,6 +138,18 @@ DATABASES = {
     'default': {
         'ENGINE': 'django.db.backends.sqlite3',
         'NAME': BASE_DIR / 'db.sqlite3',
+    }
+}
+
+SWAGGER_SETTINGS = {
+    # 'VALIDATOR_URL': 'http://localhost:8000',
+    # "exclude_namespaces": [],  # List URL namespaces to ignore
+    'SECURITY_DEFINITIONS': {
+        'Bearer': {
+            'type': 'apiKey',
+            'name': 'Authorization',
+            'in': 'header'
+        }
     }
 }
 
@@ -186,3 +213,6 @@ STATICFILES_DIRS = [
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
+
+SELLMMO_KEY = os.environ.get('SECRET_KEY')
+DONGVAN_KEY = os.environ.get('DONGVAN_KEY')
