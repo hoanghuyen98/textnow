@@ -14,6 +14,7 @@ https://docs.djangoproject.com/en/5.2/ref/settings/
 from pathlib import Path
 from datetime import timedelta
 from dotenv import load_dotenv
+import os
 load_dotenv()
 # Build paths inside the project like this: BASE_DIR / 'subdir'.
 BASE_DIR = Path(__file__).resolve().parent.parent
@@ -45,7 +46,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
-    'customer',
+    'app',
 ]
 
 MIDDLEWARE = [
@@ -61,9 +62,28 @@ MIDDLEWARE = [
 ]
 
 REST_FRAMEWORK = {
-    'DEFAULT_AUTHENTICATION_CLASSES': (
+    'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
-    )
+    ],
+    # 'DEFAULT_PERMISSION_CLASSES': [
+    #     'rest_framework.permissions.IsAuthenticated',
+    # ],
+    "DEFAULT_THROTTLE_CLASSES": [
+        "rest_framework.throttling.AnonRateThrottle",   # user chưa đăng nhập
+        "rest_framework.throttling.UserRateThrottle",   # user đăng nhập
+        "rest_framework.throttling.ScopedRateThrottle", # giới hạn theo từng API
+    ],
+    "DEFAULT_THROTTLE_RATES": {
+        "anon": "20/min",        # 60 request/phút cho IP ẩn danh
+        "user": "100/min",       # 600 request/phút cho user đã login
+        'ip_global': '200/min',
+        "login": "3/second",          # API login
+        "token_refresh": "3/second", # refresh token
+        "logout": "3/second",        # logout
+        'light': '3/second',       # API nhẹ (GET info, list, v.v.)
+        'medium': '3/second',       # API tương tác (chat, gửi tin)
+        'heavy': '3/second',        # API nặng (mua mail, upload)
+    },
 }
 
 ROOT_URLCONF = 'sideline.urls'
@@ -117,10 +137,7 @@ TEMPLATES = [
 
 WSGI_APPLICATION = 'sideline.wsgi.application'
 CORS_ALLOW_CREDENTIALS = True
-CSRF_TRUSTED_ORIGINS = [
-    "https://divisibly-pelagic-roosevelt.ngrok-free.dev",  # 👈 bắt buộc có https://
-    "https://phonechatfrontend.vercel.app",
-]
+
 
 SESSION_COOKIE_SECURE = False
 CSRF_COOKIE_SECURE = False
@@ -131,16 +148,27 @@ CELERY_ACCEPT_CONTENT = ['json']
 CELERY_TASK_SERIALIZER = 'json'
 CELERY_RESULT_SERIALIZER = 'json'
 
+CACHES = {
+    "default": {
+        "BACKEND": "django_redis.cache.RedisCache",
+        "LOCATION": "redis://127.0.0.1:6379/1",
+        "OPTIONS": {"CLIENT_CLASS": "django_redis.client.DefaultClient"},
+    }
+}
+
 # Database
 # https://docs.djangoproject.com/en/5.2/ref/settings/#databases
 
 DATABASES = {
     'default': {
-        'ENGINE': 'django.db.backends.sqlite3',
-        'NAME': BASE_DIR / 'db.sqlite3',
+        'ENGINE': 'django.db.backends.postgresql',
+        'NAME': os.environ.get('PG_DB'),
+        'USER': os.environ.get('PG_USERNAME'),
+        'PASSWORD': os.environ.get('PG_PASSWORD'),
+        'HOST': os.environ.get('PG_HOST', 'localhost'),
+        'PORT': os.environ.get('PG_PORT', '5432'),
     }
 }
-
 SWAGGER_SETTINGS = {
     # 'VALIDATOR_URL': 'http://localhost:8000',
     # "exclude_namespaces": [],  # List URL namespaces to ignore
@@ -172,15 +200,6 @@ AUTH_PASSWORD_VALIDATORS = [
     },
 ]
 
-# REST_FRAMEWORK = {
-#     'DEFAULT_AUTHENTICATION_CLASSES': [
-#         'rest_framework.authentication.TokenAuthentication',
-#     ],
-#     'DEFAULT_PERMISSION_CLASSES': [
-#         'rest_framework.permissions.IsAuthenticated',
-#     ],
-# }
-
 
 # Internationalization
 # https://docs.djangoproject.com/en/5.2/topics/i18n/
@@ -197,7 +216,7 @@ USE_TZ = True
 # Static files (CSS, JavaScript, Images)
 # https://docs.djangoproject.com/en/5.2/howto/static-files/
 
-STATIC_URL = 'static/'
+STATIC_URL = '/static/'
 STATICFILES_FINDERS = [
     'django.contrib.staticfiles.finders.FileSystemFinder',
     'django.contrib.staticfiles.finders.AppDirectoriesFinder'
@@ -205,14 +224,11 @@ STATICFILES_FINDERS = [
 
 STATIC_ROOT = BASE_DIR / 'staticfiles'
 
-STATICFILES_DIRS = [
-    BASE_DIR / 'customer' / 'static'
-]
+# STATICFILES_DIRS = [
+#     BASE_DIR / 'customer' / 'static'
+# ]
 
 # Default primary key field type
 # https://docs.djangoproject.com/en/5.2/ref/settings/#default-auto-field
 
 DEFAULT_AUTO_FIELD = 'django.db.models.BigAutoField'
-
-SELLMMO_KEY = os.environ.get('SECRET_KEY')
-DONGVAN_KEY = os.environ.get('DONGVAN_KEY')
