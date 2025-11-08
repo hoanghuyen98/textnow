@@ -1,0 +1,107 @@
+{% load static %}
+<!DOCTYPE html>
+<html lang="en">
+<head>
+  <meta charset="UTF-8">
+  <title>Chat-bee Dashboard</title>
+  <link rel="stylesheet" href="{% static 'css/customer.css' %}">
+  <script src="https://cdn.jsdelivr.net/npm/axios/dist/axios.min.js"></script>
+</head>
+
+<body>
+<div class="app-container">
+
+  <!-- Sidebar -->
+  <aside class="sidebar">
+    <div class="sidebar-header">
+      <div class="user-profile">
+        <div class="avatar">U</div>
+        <div class="username">userlyulpcs5</div>
+      </div>
+      <button class="new-msg-btn" onclick="startNewMsg()">✉️ New Message</button>
+    </div>
+
+    <div class="search-box">
+      <input id="search" placeholder="Search conversations…" />
+    </div>
+
+    <div class="stats">
+      <div>Total <span id="total">10</span></div>
+      <div>Active <span id="active">10</span></div>
+      <div>Inactive <span id="inactive">0</span></div>
+    </div>
+
+    <div class="conversation-list" id="numberList">
+      <div class="number-item" onclick="selectMyNumber('(201) 609-7463','14143483232')">
+        <div class="icon">📞</div>
+        <div class="info">
+          <div class="num">(201) 609-7463</div>
+          <div class="time">87s</div>
+        </div>
+      </div>
+      <div class="number-item" onclick="selectMyNumber('(207) 810-8767','12078108767')">
+        <div class="icon">📞</div>
+        <div class="info">
+          <div class="num">(207) 810-8767</div>
+          <div class="time">17s</div>
+        </div>
+      </div>
+    </div>
+  </aside>
+
+  <!-- Main Panel -->
+  <main class="chat-panel">
+    <div id="chat-header">
+      <h2 id="header-title">Select or start a conversation</h2>
+    </div>
+
+    <div id="chat-body" class="chat-body">
+      <p class="placeholder">Choose a phone number from the left, then start a conversation.</p>
+    </div>
+
+    <div class="chat-input">
+      <input id="toNumber" placeholder="Recipient number (e.g. 14145556666)" />
+      <input id="msg" placeholder="Type message…" />
+      <button onclick="sendMsg()">Send</button>
+    </div>
+  </main>
+</div>
+
+<script>
+let myNumber = null;
+let myDisplay = null;
+
+function selectMyNumber(display, num) {
+  myNumber = num;
+  myDisplay = display;
+  document.getElementById("header-title").innerText = `Chat as ${display}`;
+  document.querySelector(".placeholder").innerText = "Loading messages…";
+  refreshInbox();
+}
+
+function startNewMsg(){
+  document.getElementById("toNumber").focus();
+}
+
+function sendMsg(){
+  if(!myNumber) return alert("Select your number first!");
+  const to = document.getElementById("toNumber").value.trim();
+  const text = document.getElementById("msg").value.trim();
+  if(!to || !text) return alert("Please enter both recipient and message");
+  axios.post("/send/", {from_number: myNumber, to_number: to, text})
+    .then(()=>{document.getElementById("msg").value='';refreshInbox();})
+    .catch(()=>alert("Send failed"));
+}
+
+function refreshInbox(){
+  axios.get(`/refresh/?number=${myNumber}`)
+    .then(res=>{
+      const data=res.data;
+      document.getElementById("chat-body").innerHTML =
+        `<pre>${JSON.stringify(data,null,2)}</pre>`;
+    })
+    .catch(()=>alert("Fetch failed"));
+}
+</script>
+</body>
+</html>
