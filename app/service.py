@@ -8,7 +8,7 @@ load_dotenv()
 
 SELLMMO_KEY = os.environ.get('SELLMMO_KEY')
 DONGVAN_KEY = os.environ.get('DONGVAN_KEY')
-
+print("SELLMMO_KEY from .env:", os.getenv("SELLMMO_KEY"))
 API_CONFIG = {
     "sellmmo": {
         "base_url": "https://www.sellmmo.net/api",
@@ -52,9 +52,8 @@ def fetch_categories(provider: str):
   
     try:
         resp = requests.get(url, params=params, timeout=10)
-        resp.raise_for_status()
         data = resp.json()
-        print('data: ', data)
+        
     except Exception as e:
         logger.error(f"Lỗi khi gọi tới API của {provider}: {str(e)}")
         return {"status": "error", "message": "Lỗi hệ thống"}
@@ -96,6 +95,7 @@ def fetch_categories(provider: str):
                 "amount": item.get("quality")
             })
     return {"status": "success", "provider": provider, "count": len(result), "data": result}
+
 
 def buy_mail_sellmmo(employee, product_id: str, amount: int = 1, coupon: str = ""):
 

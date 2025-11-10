@@ -32,7 +32,7 @@ urlpatterns = [
 
     # khách hàng
     path('customer_info/',views.CustomerInfoView.as_view(), name='customer_info'),
-
+    path('auto_create_customers/',views.AutoCreateCustomerView.as_view(), name='auto_create_customers'),
 
     # login/logout
     path("login/", views.CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),
@@ -41,6 +41,8 @@ urlpatterns = [
 
     # Mail 
     path("mail_categories/", views.MailCategoriesView.as_view(), name="mail_categories"),
+    path("delete_mail/", views.PurchasedMailBulkDeleteView.as_view(), name="delete_mail"),
+    
     path("buy_mail/", views.BuyMailView.as_view(), name="buy_mail"),
     path("get_auth_code/", views.GetAuthCodeView.as_view(), name="get_auth_code"),
     path("purchased_mails/", views.ListPurchasedMailsView.as_view(), name="purchased_mails"),

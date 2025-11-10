@@ -10,7 +10,7 @@ from datetime import timedelta
 def check_phone_all_batches():
     """
     Kiểm tra toàn bộ batch trong PhoneAccount.
-    - Bỏ qua các số die, die_use, lock
+    - Bỏ qua các số die, die_use, lock, hoặc đã được sử dụng (is_used=True)
     - Nếu status = live quá 24h → chuyển sang lock
     - Nếu run_curl lỗi → status = die_use
     - Nếu thành công → status = live (reset thời gian sống)
@@ -25,15 +25,17 @@ def check_phone_all_batches():
     locked = 0
     logs = []
 
-    # ✅ chỉ lấy các số còn khả dụng (không bị die, die_use, lock)
-    phone_qs = PhoneAccount.objects.exclude(status__in=["die", "die_use", "lock"])
-    print(f"🔍 Bắt đầu kiểm tra {phone_qs.count()} tài khoản khả dụng...")
+    # ✅ chỉ lấy các số live, chưa bị die/lock, và chưa được sử dụng
+    phone_qs = PhoneAccount.objects.exclude(
+        status__in=["die", "die_use", "lock"]
+    ).filter(is_used=False)
+
+    print(f"🔍 Bắt đầu kiểm tra {phone_qs.count()} tài khoản khả dụng (chưa dùng)...")
 
     for phone in phone_qs:
-
-
         total += 1
         curl_text = phone.batch
+
         if not curl_text:
             logs.append({
                 "phone": phone.phone,
@@ -76,6 +78,7 @@ def check_phone_all_batches():
                 "message": "🔒 Locked (đã sống quá 24h kể từ khi tạo)"
             })
             print(f"[{phone.phone}] 🔒 Locked (đã sống quá 24h kể từ khi tạo)")
+            phone.save()
             continue
             
         phone.save()
@@ -95,8 +98,7 @@ def check_phone_all_batches():
         "logs": logs,
     }
 
-    print(f"✅ Done checking {total} accounts: {success} live, {failed} failed.")
-    print(f"Summary: {summary}")
+    print(f"✅ Done checking {total} accounts: {success} live, {failed} failed, {locked} locked.")
     return summary
 
 @shared_task

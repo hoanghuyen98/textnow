@@ -56,6 +56,38 @@ class Employee(models.Model):
             self.user.delete()
         super().delete(*args, **kwargs)
 
+class Customer(models.Model):
+    user = models.OneToOneField(
+        User,
+        on_delete=models.CASCADE,
+        related_name="customer_profile"
+    )
+    raw_password = models.TextField(blank=True, null=True)
+    phone_assigned_count = models.PositiveIntegerField(default=0)
+
+    def __str__(self):
+        return f"{self.user.username}"
+
+    def delete(self, *args, **kwargs):
+        """
+        Khi xóa Customer:
+        - Gỡ liên kết khỏi các PhoneAccount
+        - Đặt lại is_used=False để có thể tái sử dụng
+        - Xóa luôn User tương ứng
+        """
+        # ✅ Gỡ liên kết các phone trước khi xóa Customer
+        for phone in self.phones.all():
+            phone.customer = None
+            phone.save(update_fields=['customer'])
+
+        # ✅ Xóa user
+        if self.user:
+            self.user.delete()
+
+        # ✅ Xóa customer (không xóa phone)
+        super().delete(*args, **kwargs)
+
+
 class PhoneAccount(models.Model):
 
     STATUS_CHOICES = [
@@ -74,7 +106,7 @@ class PhoneAccount(models.Model):
 
     customer = models.ForeignKey(
         'Customer',
-        on_delete=models.CASCADE,
+        on_delete=models.SET_NULL,
         related_name='phones',
         null=True,
         blank=True

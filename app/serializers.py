@@ -5,8 +5,10 @@ from .models import PhoneAccount, Customer, PurchasedMail, EmployeeGroup, Employ
 from django.contrib.auth.models import User
 from django.core.validators import RegexValidator
 from django.db.models import Q
+from django.db import transaction
 from .models import PhoneAccount  # tránh circular import
-
+from logzero import logger
+import random, string
 
 class EmployeeGroupSerializer(serializers.ModelSerializer):
     class Meta:
@@ -152,13 +154,14 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
     phone = serializers.CharField(required=False, allow_blank=True, allow_null=True)
 
     # ✅ Chuẩn hoá tên — loại bỏ ký tự đặc biệt, chỉ giữ chữ và số
-    def normalize_name(self, text: str) -> str:
+    def normalize_phone(self, text: str) -> str:
         if not text:
             return ""
-        return re.sub(r"[^A-Za-z0-9\s]", "", text).strip()
+        # Giữ lại chỉ chữ và số, bỏ ký tự đặc biệt và khoảng trắng
+        return re.sub(r"[^A-Za-z0-9]", "", text)
 
     # ✅ Chuẩn hoá số điện thoại sang dạng (XXX) XXX-XXXX nếu nhập thô
-    def normalize_phone(self, text: str) -> str:
+    def normalize_name(self, text: str) -> str:
         if not text:
             return ""
         digits = re.sub(r"\D", "", text)
@@ -201,7 +204,7 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
             if not value:
                 continue
             # dùng icontains để tránh lỗi None
-            if PhoneAccount.objects.filter(**{f"{field_name}__icontains": value}).exists():
+            if PhoneAccount.objects.filter(**{f"{field_name}": value}).exists():
                 duplicates.append(key)
         return duplicates
     # =========================================================
@@ -213,16 +216,19 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
         # =====================================================
         # 🔹 Chuẩn hoá & xác định số điện thoại
         # =====================================================
-        raw_phone = data.get("phone") or data.get("name", "")
-        normalized_phone = self.normalize_phone(raw_phone)
-        data["phone"] = normalized_phone
+        raw_name = data.get("name") 
+        normalize_name = self.normalize_name(raw_name)
+        normalize_phone = self.normalize_phone(raw_name)
+        logger.info('normalize_name: ', normalize_name)
+        logger.info('normalize_phone: ', normalize_phone)
+        data["name"] = normalize_name
+        data["phone"] = normalize_phone
 
-        print('📞 Normalized phone:', normalized_phone)
 
         # Nếu không có hoặc không đúng định dạng (XXX) XXX-XXXX
-        if not normalized_phone:
+        if not normalize_name:
             errors["phone"] = "Thiếu số điện thoại hoặc không hợp lệ."
-        elif not re.match(r'^\(\d{3}\)\s?\d{3}-\d{4}$', normalized_phone):
+        elif not re.match(r'^\(\d{3}\)\s?\d{3}-\d{4}$', normalize_name):
             errors["phone"] = "Số điện thoại phải có dạng (234) 123-1234."
 
         # =====================================================
@@ -260,7 +266,7 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
         # =====================================================
         # 🔹 Kiểm tra trùng số điện thoại trong DB
         # =====================================================
-        if normalized_phone and PhoneAccount.objects.filter(phone=normalized_phone).exists():
+        if normalize_phone and PhoneAccount.objects.filter(phone=normalize_phone).exists():
             errors["phone"] = "Số điện thoại này đã tồn tại trong hệ thống."
 
         # =====================================================
@@ -277,6 +283,98 @@ class PhoneOfCustomerSimpleSerializer(serializers.ModelSerializer):
     class Meta:
         model = PhoneAccount
         fields = ["id", "name", "phone", "status"]
+
+
+class CustomerAutoCreateSerializer(serializers.Serializer):
+    phone_count = serializers.IntegerField(min_value=1, required=True)
+
+    def format_phone(self, phone: str) -> str:
+        """
+        Chuẩn hóa số điện thoại dạng 10 chữ số sang format: (289) 205-3372
+        """
+        # Lấy các ký tự số
+        digits = re.sub(r'\D', '', phone)
+
+        # Nếu có 10 số, định dạng theo chuẩn (XXX) XXX-XXXX
+        if len(digits) == 10:
+            return f"({digits[0:3]}) {digits[3:6]}-{digits[6:10]}"
+        return phone  # fallback nếu không đủ 10 số
+
+    def create(self, validated_data):
+        phone_count = validated_data["phone_count"]
+        logger.info(phone_count)
+        logger.info("check")
+        all_obj = PhoneAccount.objects.all()
+        all_obj = PhoneAccount.objects.all()
+
+        for obj in all_obj:
+            print(f"id={obj.id}, phone={obj.phone}, status='{obj.status}', is_used={obj.is_used}")
+        logger.info(all_obj)
+
+        available_phones = (
+            PhoneAccount.objects.filter(status="live", is_used=False)
+            .order_by("created_at")[: phone_count * 2]
+        )
+        logger.info(available_phones)
+
+        
+        if available_phones.count() == 0:
+            return {
+                "status": "error",
+                "message": "Không có số điện thoại khả dụng (live & chưa dùng).",
+                "data": None
+            }
+
+        created_accounts = []
+        created_count = 0
+
+        with transaction.atomic():
+            for phone in available_phones:
+                if created_count >= phone_count:
+                    break
+
+                formatted_phone = self.format_phone(phone.phone)
+                username = formatted_phone
+
+                # Nếu user đã tồn tại thì bỏ qua
+                if User.objects.filter(username=username).exists():
+                    continue
+
+                password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+
+                # 🔹 Tạo user
+                user = User.objects.create_user(username=username, password=password)
+
+                # 🔹 Tạo customer
+                customer = Customer.objects.create(
+                    user=user,
+                    raw_password=password,
+                    phone_assigned_count=1
+                )
+
+                # 🔹 Gán số điện thoại
+                phone.customer = customer
+                phone.is_used = True
+                phone.save()
+
+                created_accounts.append({
+                    "username": username,
+                    "password": password,
+                })
+                created_count += 1
+
+            if created_count < phone_count:
+                return {
+                    "status": "warning",
+                    "message": f"Chỉ tạo được {created_count}/{phone_count} tài khoản (do trùng username hoặc thiếu số khả dụng).",
+                    "data": created_accounts
+                }
+
+        return {
+            "status": "success",
+            "message": f"Tạo thành công {created_count} tài khoản khách hàng.",
+            "data": created_accounts
+        }
 
 
 class CustomerSerializer(serializers.ModelSerializer):

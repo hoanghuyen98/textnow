@@ -6,11 +6,10 @@ import requests, json, time, logging
 from rest_framework import status, viewsets, permissions, serializers
 from django.contrib.auth import authenticate, login, logout
 from rest_framework.decorators import action
-from .serializers import PhoneAccountSerializer, CustomerSerializer, PurchasedMailSerializer, EmployeeGroupSerializer, EmployeeSerializer, GetAuthCodeSerializer, PurchasedMailSerializer,CreatePhoneAccountSerializer, MailCategoriesViewSerializer
+from .serializers import PhoneAccountSerializer, CustomerSerializer, PurchasedMailSerializer, EmployeeGroupSerializer, EmployeeSerializer, GetAuthCodeSerializer, PurchasedMailSerializer,CreatePhoneAccountSerializer, MailCategoriesViewSerializer, CustomerAutoCreateSerializer
 from rest_framework.response import Response
 from django.db.models import Count, Q
 from rest_framework.decorators import api_view, permission_classes
-from django.views.decorators.csrf import csrf_exempt
 import base64
 from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer
 from rest_framework.permissions import IsAuthenticated, AllowAny
@@ -36,6 +35,11 @@ from .tasks import check_phone_all_batches
 from rest_framework.throttling import ScopedRateThrottle
 from drf_yasg import openapi
 from logzero import logger
+from .exceptions import BadRequest, Unauthorized, NotFound
+
+from django.utils.decorators import method_decorator
+from django.views.decorators.csrf import csrf_exempt
+
 logger = logging.getLogger(__name__)
 
 # ===== Views =====
@@ -97,14 +101,20 @@ class CustomTokenObtainPairView(TokenObtainPairView):
 
 class CustomTokenRefreshSerializer(TokenRefreshSerializer):
     def validate(self, attrs):
-        data = super().validate(attrs)
-        print('data: ')
+        # Bọc super().validate để chặn lỗi người dùng không tồn tại / token lỗi
         try:
-            access = AccessToken(data["access"])
-            print('access: ', access)
-            user = User.objects.get(id=access["user_id"])
+            data = super().validate(attrs)
         except Exception:
-            return data
+            # refresh token không hợp lệ
+            raise Unauthorized("Refresh token không hợp lệ hoặc đã hết hạn.")
+
+        # Parse access mới để gắn role/username
+        access = AccessToken(data["access"])
+        user_id = access.get("user_id")
+        user = User.objects.filter(id=user_id).first()
+        if not user:
+            # Giờ trả về string thuần, không bị list
+            raise NotFound("Tài khoản không tồn tại hoặc đã bị xoá.")
 
         if hasattr(user, "employee_profile"):
             role = user.employee_profile.role
@@ -424,7 +434,36 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 "message": f"Lỗi khi xoá nhân viên"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            
+class AutoCreateCustomerView(APIView):
+    """
+    POST: Truyền vào phone_count → Tự động tạo tài khoản Customer
+    """
+    permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
+    allowed_roles = ["admin"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "light"
+
+    def post(self, request):
+        serializer = CustomerAutoCreateSerializer(data=request.data)
+        if serializer.is_valid():
+            result = serializer.save()  # result đã là dict gồm status, message, data
+
+            # Tự chọn mã HTTP theo status trả về
+            http_status = status.HTTP_200_OK
+            if result["status"] == "error":
+                http_status = status.HTTP_400_BAD_REQUEST
+            elif result["status"] == "warning":
+                http_status = status.HTTP_206_PARTIAL_CONTENT  # 206: partial success
+
+            return Response(result, status=http_status)
+
+        return Response({
+            "status": "error",
+            "message": "Dữ liệu không hợp lệ.",
+            "errors": serializer.errors
+        }, status=status.HTTP_400_BAD_REQUEST)
+
+
 class CustomerViewSet(viewsets.ModelViewSet):
     queryset = Customer.objects.select_related("user").all()
     serializer_class = CustomerSerializer
@@ -591,7 +630,7 @@ class CustomerInfoView(APIView):
         phones = PhoneAccount.objects.filter(customer=customer)
         stats = {
             "total_phones": phones.count(),
-            "alive": phones.filter(status="live").count(),
+            "live": phones.filter(status="live").count(),
             "die": phones.filter(status="die").count(),
         }
 
@@ -649,15 +688,14 @@ class CreatePhoneAccountView(APIView):
                 {"status": "fail", "detail": serializer.errors},
                 status=status.HTTP_400_BAD_REQUEST
             )
-
-        phone_obj = serializer.save()
+        phone_obj = serializer.save(creator=request.user.employee_profile)
 
         try:
             result = run_curl(phone_obj.batch)
             if "error" in result or result.get("status", 0) >= 400:
                 phone_obj.status = "die"
             else:
-                phone_obj.status = "alive"
+                phone_obj.status = "live"
         except Exception as e:
             print("Exception while testing curl:", e)
             phone_obj.status = "die"
@@ -1003,7 +1041,6 @@ class SendMediaView(APIView):
                 resp = requests.post(url, headers=headers, data=file.file, timeout=60)
                 upload_text = resp.text
                 print('upload_text: ' , upload_text)
-                resp.raise_for_status()
 
             except Exception as e:
                 logger.error("Lỗi upload ảnh:", str(e))
@@ -1149,7 +1186,7 @@ class BuyMailView(APIView):
     def post(self, request):
         user = getattr(request.user, "employee_profile", None)
         provider = request.data.get("provider", "").lower().strip()
-
+        logger.info(f"provider: {provider}")
         if not provider:
             return Response(
                 {"status": "error", "message": "Thiếu provider."},
@@ -1163,15 +1200,17 @@ class BuyMailView(APIView):
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        amount = int(request.data.get("amount", 1))
+        quality = int(request.data.get("quality", 0))
+        print("-----------")
+        print(quality)
         coupon = request.data.get("coupon", "")
 
         try:
             if provider == "sellmmo":
-                result = buy_mail_sellmmo(employee=user, product_id=product_id, amount=amount, coupon=coupon)
+                result = buy_mail_sellmmo(employee=user, product_id=product_id, amount=quality, coupon=coupon)
                 print('result: ', result)
             elif provider == "dongvan":
-                result = buy_mail_dongvan(employee=user, account_type=product_id, quality=amount)
+                result = buy_mail_dongvan(employee=user, account_type=product_id, quality=quality)
 
             else:
                 return Response(
@@ -1573,31 +1612,37 @@ class PurchasedMailViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
-    @action(detail=False, methods=["delete"], url_path="delete-all")
+class PurchasedMailBulkDeleteView(APIView):
+    permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
+    authentication_classes = [JWTAuthentication]
+    allowed_roles = ["admin", "staff"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'light'
+
     @transaction.atomic
-    def delete_all(self, request):
-        """DELETE /api/v1/purchased-mails/delete-all/"""
+    def delete(self, request):
         user = request.user
         employee = getattr(user, "employee_profile", None)
-        if not employee:
-            return Response(
-                {"status": "error", "message": "Chỉ nhân viên mới có quyền xoá mail."},
-                status=status.HTTP_403_FORBIDDEN,
-            )
-
-        # Lấy đúng phạm vi theo role (admin = tất cả, staff = của mình)
-        qs = self.get_queryset().only("id", "purchase_id")
+        
+        # Chỉ lấy mail do nhân viên này đã mua
+        qs = PurchasedMail.objects.only("id", "purchase_id").filter(
+            purchase__employee=employee
+        )
 
         if not qs.exists():
             return Response(
-                {"status": "success", "message": "Không có mail nào để xoá.", "data": {"deleted_mails": 0, "deleted_purchases": 0}},
+                {
+                    "status": "success",
+                    "message": "Không có mail nào để xoá.",
+                    "data": {"deleted_mails": 0, "deleted_purchases": 0},
+                },
                 status=status.HTTP_200_OK,
             )
 
-        # Lưu lại các purchase bị ảnh hưởng
+        # Lưu lại các đơn mua bị ảnh hưởng
         purchase_ids = list(qs.values_list("purchase_id", flat=True).distinct())
 
-        # Xoá toàn bộ mails trong phạm vi
+        # Xoá toàn bộ mail thuộc nhân viên
         deleted_mails, _ = qs.delete()
 
         # Xoá MailTransaction không còn mail nào
@@ -1611,7 +1656,8 @@ class PurchasedMailViewSet(viewsets.ModelViewSet):
         return Response(
             {
                 "status": "success",
-                "message": f"Đã xoá {deleted_mails} mail. Đã xoá {deleted_purchases} đơn mua không còn mail.",
+                "message": f"Đã xoá {deleted_mails} mail do bạn mua. "
+                           f"Đã xoá {deleted_purchases} đơn mua không còn mail.",
                 "data": {
                     "deleted_mails": deleted_mails,
                     "deleted_purchases": deleted_purchases,
@@ -1619,7 +1665,6 @@ class PurchasedMailViewSet(viewsets.ModelViewSet):
             },
             status=status.HTTP_200_OK,
         )
-
 
 class PhoneReportView(APIView):
     """

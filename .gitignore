@@ -11,7 +11,7 @@ __pycache__/
 
 # SQLite database (nếu chỉ dùng local)
 db.sqlite3
-
+ app/__pycache__/
 # Django stuff:
 local_settings.py
 settings_local.py
@@ -23,6 +23,7 @@ settings_local.py
 static/
 staticfiles/
 media/
+staticfiles
 
 # Migration cache (tự sinh khi chạy makemigrations)
 */migrations/__pycache__/
