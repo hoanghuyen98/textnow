@@ -1,0 +1,117 @@
+# ========================================
+# 🐍 PYTHON & DJANGO
+# ========================================
+__pycache__/
+*.py[cod]
+*.pyc
+*.pyo
+*.pyd
+*.so
+*.egg-info/
+*.egg
+*.log
+
+# SQLite database (nếu chỉ dùng local)
+db.sqlite3
+
+# Django stuff:
+local_settings.py
+settings_local.py
+.env
+*.env
+.env.*
+
+# Static & media files (tự sinh)
+static/
+staticfiles/
+media/
+
+# Migration cache (tự sinh khi chạy makemigrations)
+*/migrations/__pycache__/
+*/migrations/*.pyc
+
+# ========================================
+# 🧰 VIRTUAL ENVIRONMENTS
+# ========================================
+.venv/
+venv/
+env/
+ENV/
+.envrc
+
+# Poetry
+poetry.lock
+# Nếu bạn chỉ muốn lưu pyproject.toml, giữ dòng trên
+
+# Pipenv
+Pipfile.lock
+
+# ========================================
+# 🐳 DOCKER / DEPLOY
+# ========================================
+Dockerfile
+docker-compose.yml
+*.pid
+*.seed
+*.tar
+*.bak
+*.swp
+
+# Gunicorn / Uvicorn
+*.sock
+*.pid
+*.log
+
+# ========================================
+# 🧩 IDE / EDITOR
+# ========================================
+.vscode/
+.idea/
+*.iml
+*.sublime-project
+*.sublime-workspace
+
+# ========================================
+# 🧠 TESTS / COVERAGE
+# ========================================
+.coverage
+htmlcov/
+.tox/
+.nox/
+.cache/
+pytest_cache/
+
+# ========================================
+# ☁️ AWS / CLOUD / SECRETS
+# ========================================
+*.pem
+*.key
+*.crt
+*.csr
+*.p12
+*.pfx
+
+# ========================================
+# 🧾 DJANGO STATIC BUILD (VUE/REACT)
+# ========================================
+frontend/dist/
+frontend/node_modules/
+frontend/.env
+frontend/.vite/
+frontend/.nuxt/
+frontend/.next/
+frontend/build/
+*.map
+
+# ========================================
+# 📦 BUILD / TEMP FILES
+# ========================================
+*.tmp
+*.temp
+*.bak
+*.old
+*.orig
+*.swp
+*.swo
+*.DS_Store
+Thumbs.db
