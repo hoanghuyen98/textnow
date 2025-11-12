@@ -8,7 +8,8 @@ __pycache__/
 *.egg-info/
 *.egg
 *.log
-
+app/__pycache__/
+sideline/__pycache__/
 # SQLite database (nếu chỉ dùng local)
 db.sqlite3
  app/__pycache__/

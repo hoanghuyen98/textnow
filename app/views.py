@@ -6,14 +6,14 @@ import requests, json, time, logging
 from rest_framework import status, viewsets, permissions, serializers
 from django.contrib.auth import authenticate, login, logout
 from rest_framework.decorators import action
-from .serializers import PhoneAccountSerializer, CustomerSerializer, PurchasedMailSerializer, EmployeeGroupSerializer, EmployeeSerializer, GetAuthCodeSerializer, PurchasedMailSerializer,CreatePhoneAccountSerializer, MailCategoriesViewSerializer, CustomerAutoCreateSerializer
+from .serializers import PhoneAccountSerializer, CustomerSerializer, PurchasedMailSerializer, EmployeeGroupSerializer, EmployeeSerializer, GetAuthCodeSerializer, PurchasedMailSerializer,CreatePhoneAccountSerializer, MailCategoriesViewSerializer, CustomerAutoCreateSerializer, AppleMailProxySerializer
 from rest_framework.response import Response
 from django.db.models import Count, Q
 from rest_framework.decorators import api_view, permission_classes
 import base64
-from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer
+from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer, MailTransaction, AppleMailProxy
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .utils import run_curl, parse_curl, strip_proxy, send_pinger_message, normalize_phone_number
+from .utils import run_curl, parse_curl, strip_proxy, send_pinger_message, normalize_phone_number, parse_time, to_utc_isoformat
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import AccessToken
@@ -34,11 +34,12 @@ from datetime import datetime
 from .tasks import check_phone_all_batches
 from rest_framework.throttling import ScopedRateThrottle
 from drf_yasg import openapi
+
+
+from collections import OrderedDict
 from logzero import logger
 from .exceptions import BadRequest, Unauthorized, NotFound
-
-from django.utils.decorators import method_decorator
-from django.views.decorators.csrf import csrf_exempt
+# from rest_framework_simplejwt.authentication import JWTAuthentication
 
 logger = logging.getLogger(__name__)
 
@@ -154,6 +155,56 @@ class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
 
+class AppleMailProxyViewSet(viewsets.ReadOnlyModelViewSet):
+    """
+    API CRUD cho AppleMailProxy
+    - GET /api/applemail/ : lấy danh sách proxy mail
+    - POST /api/applemail/ : thêm mới
+    - GET /api/applemail/{id}/ : xem chi tiết
+    - PUT/PATCH /api/applemail/{id}/ : cập nhật
+    - DELETE /api/applemail/{id}/ : xóa
+    """
+    queryset = AppleMailProxy.objects.all().select_related("employee").order_by("-created_at")
+    serializer_class = AppleMailProxySerializer
+    allowed_roles = ["admin", "staff"]
+    permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "medium"
+
+    def list(self, request, *args, **kwargs):
+        latest_record = self.get_queryset().first()
+        if not latest_record:
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Không có bản ghi nào trong AppleMailProxy.",
+                    "data": None,
+                },
+                status=status.HTTP_200_OK
+            )
+
+        serializer = self.get_serializer(latest_record)
+        return Response(
+            {
+                "status": "success",
+                "message": "Lấy bản ghi AppleMailProxy mới nhất thành công.",
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK
+        )
+
+
+    def retrieve(self, request, *args, **kwargs):
+        instance = self.get_object()
+        serializer = self.get_serializer(instance)
+        return Response(
+            {
+                "status": "success",
+                "message": "Lấy chi tiết AppleMailProxy thành công.",
+                "data": serializer.data,
+            },
+            status=status.HTTP_200_OK,
+        )
 
 class EmployeeGroupViewSet(viewsets.ModelViewSet):
     queryset = EmployeeGroup.objects.all()
@@ -595,7 +646,7 @@ class CustomerViewSet(viewsets.ModelViewSet):
     # ✅ DELETE
     # ---------------------------
     def destroy(self, request, *args, **kwargs):
-        try:
+        # try:
             instance = self.get_object()
             username = instance.user.username if instance.user else instance.name
             instance.delete()
@@ -603,17 +654,17 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 "status": "success",
                 "message": f"Đã xóa khách hàng '{username}' thành công."
             }, status=status.HTTP_200_OK)
-        except Customer.DoesNotExist:
-            return Response({
-                "status": "error",
-                "message": "Không tìm thấy khách hàng để xóa."
-            }, status=status.HTTP_404_NOT_FOUND)
-        except Exception as e:
-            logger.error(f"Lỗi khi xóa khách hàng: {str(e)}")
-            return Response({
-                "status": "error",
-                "message": f"Lỗi khi xóa khách hàng"
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        # except Customer.DoesNotExist:
+        #     return Response({
+        #         "status": "error",
+        #         "message": "Không tìm thấy khách hàng để xóa."
+        #     }, status=status.HTTP_404_NOT_FOUND)
+        # # except Exception as e:
+        #     logger.error(f"Lỗi khi xóa khách hàng: {str(e)}")
+        #     return Response({
+        #         "status": "error",
+        #         "message": f"Lỗi khi xóa khách hàng"
+        #     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class CustomerInfoView(APIView):
@@ -736,7 +787,7 @@ class RefreshInboxView(APIView):
             )
 
         # --- Lấy thông tin phone ---
-        obj = get_object_or_404(PhoneAccount, phone=phone)
+        obj = get_object_or_404(PhoneAccount, name=phone)
         if obj.status != "live":
             return Response(
                 {
@@ -753,6 +804,7 @@ class RefreshInboxView(APIView):
 
         # --- Gọi cURL để lấy dữ liệu tin nhắn ---
         raw_result = run_curl(obj.batch)
+        print("raw_result: ", raw_result)
         if (
             not raw_result
             or raw_result.get("error")
@@ -808,8 +860,7 @@ class RefreshInboxView(APIView):
                     direction = msg.get("direction")
                     text = msg.get("text", "")
                     media = msg.get("media", {}).get("image") if msg.get("media") else None
-                    time_created = msg.get("timeCreated")
-
+                    time_created = to_utc_isoformat(msg.get("timeCreated"))
                     if direction == "out":
                         other_info = msg.get("to", [{}])[0]
                     else:
@@ -895,7 +946,7 @@ class SendMessageView(APIView):
 
         try:
             # 🔍 Lấy cấu hình cURL từ DB
-            obj = get_object_or_404(PhoneAccount, phone=phone)
+            obj = get_object_or_404(PhoneAccount, name=phone)
             if obj.status != "live":
               return Response(
                   {
@@ -1002,7 +1053,7 @@ class SendMediaView(APIView):
 
         try:
             # 🔍 Lấy tài khoản Pinger tương ứng
-            obj = get_object_or_404(PhoneAccount, phone=phone)
+            obj = get_object_or_404(PhoneAccount, name=phone)
             if obj.status != "live":
                 return Response(
                     {
@@ -1339,53 +1390,31 @@ class SaveAppleMailView(APIView):
         mail = request.data.get("mail")
         proxy_ip = request.data.get("proxy")
 
-        # ✅ Kiểm tra đầu vào
         if not mail or not proxy_ip:
             return Response(
                 {"status": "error", "message": "Thiếu mail hoặc proxy."},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # 🧩 Xác định nhân viên đang thao tác
         employee = getattr(request.user, "employee_profile", None)
-        if not employee:
-            return Response(
-                {"status": "error", "message": "Chỉ nhân viên mới có quyền lưu mail Apple."},
-                status=status.HTTP_403_FORBIDDEN
-            )
 
         try:
-            # 🧱 Tìm hoặc tạo mới
-            record, created = AppleMailProxy.objects.get_or_create(
+            # 🧹 Nếu nhân viên đã có bản ghi cũ thì xóa đi
+            existing_record = AppleMailProxy.objects.filter(employee=employee).first()
+            if existing_record:
+                existing_record.delete()
+
+            # 🆕 Sau đó tạo mới
+            record = AppleMailProxy.objects.create(
                 mail=mail.strip().lower(),
-                defaults={
-                    "proxy_ip": proxy_ip.strip(),
-                    "employee": employee
-                }
+                proxy_ip=proxy_ip.strip(),
+                employee=employee,
+                creator=employee
             )
 
-            if not created:
-                # 🔁 Cập nhật proxy + nhân viên thao tác mới nhất
-                record.proxy_ip = proxy_ip.strip()
-                record.employee = employee
-                record.updated_at = timezone.now()
-                record.save()
-
-                return Response({
-                    "status": "success",
-                    "message": f"Đã cập nhật proxy cho mail '{mail}'.",
-                    "data": {
-                        "mail": record.mail,
-                        "proxy": record.proxy_ip,
-                        "updated_at": record.updated_at,
-                        "employee": employee.user.username
-                    }
-                }, status=status.HTTP_200_OK)
-
-            # 🆕 Nếu là bản ghi mới
             return Response({
                 "status": "success",
-                "message": f"Mail '{mail}' đã được thêm mới.",
+                "message": f"Mail '{mail}' đã được lưu mới cho nhân viên {employee.user.username}.",
                 "data": {
                     "mail": record.mail,
                     "proxy": record.proxy_ip,
@@ -1394,11 +1423,18 @@ class SaveAppleMailView(APIView):
                 }
             }, status=status.HTTP_201_CREATED)
 
+        except IntegrityError as e:
+            logger.error(f"Lỗi trùng mail: {str(e)}")
+            return Response({
+                "status": "error",
+                "message": "Mail này đã tồn tại trong hệ thống."
+            }, status=status.HTTP_400_BAD_REQUEST)
+
         except Exception as e:
             logger.error(f"Lỗi hệ thống: {str(e)}")
             return Response({
                 "status": "error",
-                "message": "Lỗi hệ thống"
+                "message": "Lỗi hệ thống khi lưu Apple Mail Proxy."
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 class SaveTextNowAccountView(APIView):
@@ -1505,7 +1541,7 @@ class EmployeePhoneSummaryView(APIView):
         try:
             # ---- Thống kê số điện thoại Pinger ----
             pinger_today_qs = PhoneAccount.objects.filter(
-                provider="pinger",
+                provider="Pinger/Textfree",
                 creator=employee,
                 created_at__date=today
             )
@@ -1515,7 +1551,7 @@ class EmployeePhoneSummaryView(APIView):
             pinger_today_die = pinger_today_qs.filter(status="die").count()
 
             pinger_month = PhoneAccount.objects.filter(
-                provider="pinger",
+                provider="Pinger/Textfree",
                 creator=employee,
                 created_at__date__gte=first_day_of_month
             ).count()
@@ -1612,9 +1648,9 @@ class PurchasedMailViewSet(viewsets.ModelViewSet):
             status=status.HTTP_200_OK,
         )
 
+
 class PurchasedMailBulkDeleteView(APIView):
     permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
-    authentication_classes = [JWTAuthentication]
     allowed_roles = ["admin", "staff"]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'light'

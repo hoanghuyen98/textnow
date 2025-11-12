@@ -56,7 +56,7 @@ MIDDLEWARE = [
     'django.middleware.security.SecurityMiddleware',
     'corsheaders.middleware.CorsMiddleware',
     'django.contrib.sessions.middleware.SessionMiddleware',
-    
+    # "app.middleware.disable_csrf_for_api.DisableCSRFForAPI",
     'django.middleware.common.CommonMiddleware',
     'django.middleware.csrf.CsrfViewMiddleware',
     'django.contrib.auth.middleware.AuthenticationMiddleware',
@@ -68,9 +68,9 @@ REST_FRAMEWORK = {
     'DEFAULT_AUTHENTICATION_CLASSES': [
         'rest_framework_simplejwt.authentication.JWTAuthentication',
     ],
-    # 'DEFAULT_PERMISSION_CLASSES': [
-    #     'rest_framework.permissions.IsAuthenticated',
-    # ],
+    'DEFAULT_PERMISSION_CLASSES': [
+        'rest_framework.permissions.IsAuthenticated',
+    ],
     "EXCEPTION_HANDLER": "app.exceptions.custom_exception_handler",
     "DEFAULT_THROTTLE_CLASSES": [
         "rest_framework.throttling.AnonRateThrottle",   # user chưa đăng nhập
@@ -96,9 +96,10 @@ ROOT_URLCONF = 'sideline.urls'
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # frontend dev
     "http://38.145.199.150",
+    "https://sideliine.com"
 ]
 
-CSRF_TRUSTED_ORIGINS = ["http://38.145.199.150", "http://localhost:5173"]
+CSRF_TRUSTED_ORIGINS = ["http://38.145.199.150", "http://localhost:5173", "https://sideliine.com"]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.ngrok-free\.dev$",

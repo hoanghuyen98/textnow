@@ -3,7 +3,10 @@ from django.utils import timezone
 from .models import MailProvider, MailTransaction, PurchasedMail
 from dotenv import load_dotenv
 from logzero import logger
+import re
+from bs4 import BeautifulSoup
 import os
+from .utils import extract_auth_code 
 load_dotenv()
 
 SELLMMO_KEY = os.environ.get('SELLMMO_KEY')
@@ -86,14 +89,16 @@ def fetch_categories(provider: str):
 
     elif provider == "dongvan":
         items = data.get("data") or []
-        for item in items:
-            name_display = f"{item.get('name')} ({item.get('price')})"
-            result.append({
-                "id": item.get("id"),
-                "name": name_display,
+        result.extend([
+            {
+                "id": int(item["id"]),
+                "name": f"{item.get('name')} ({item.get('price')})",
                 "price": item.get("price"),
-                "amount": item.get("quality")
-            })
+                "amount": item.get("quality"),
+            }
+            for item in items
+            if str(item.get("id", "")).isdigit() and int(item["id"]) in (1, 2)
+        ])
     return {"status": "success", "provider": provider, "count": len(result), "data": result}
 
 
@@ -141,8 +146,6 @@ def buy_mail_sellmmo(employee, product_id: str, amount: int = 1, coupon: str = "
             "client_id": client_id,
             "provider": provider
         })
-        print("--------------: mails" , mails)
-
 
     provider_obj, _ = MailProvider.objects.get_or_create(
         name=provider, defaults={"base_url": conf["base_url"], "api_key": conf["key"]}
@@ -258,9 +261,12 @@ def buy_mail_dongvan(employee, account_type: int, quality: int = 0, type: str = 
         "balance": result.get("balance")
     }
 
+
+
 def get_auth_code(email: str, refresh_token: str, client_id: str):
     """
     Gọi API DongVanFB để lấy danh sách message OAuth2 (auth code, nội dung mail)
+    -> Tự động trích mã xác minh từ HTML (4–8 chữ số)
     -> Trả về message mới nhất có mã code (nếu có)
     """
     url = "https://tools.dongvanfb.net/api/get_messages_oauth2"
@@ -270,14 +276,13 @@ def get_auth_code(email: str, refresh_token: str, client_id: str):
         "client_id": client_id.strip()
     }
 
-
     try:
         resp = requests.post(url, json=payload, timeout=20)
         data = resp.json()
-        print("code response:", data)
+        print("📩 DongVan response:", data)
     except Exception as e:
         logger.error(f"Lỗi khi gọi API DongVan: {e}")
-        return {"status": "error", "message": f"Lỗi hệ thống lấy Auth"}
+        return {"status": "error", "message": "Lỗi hệ thống khi gọi API DongVan."}
 
     if not data or not data.get("status"):
         return {
@@ -287,21 +292,22 @@ def get_auth_code(email: str, refresh_token: str, client_id: str):
 
     messages = data.get("messages", [])
     if not messages:
-        return {
-            "status": "error",
-            "message": f"Không có email nào trong hộp thư {email}."
-        }
+        return {"status": "error", "message": f"Không có email nào trong hộp thư {email}."}
 
-    messages_with_code = [
-        m for m in messages if m.get("code") and str(m.get("code")).strip()
-    ]
+    # 🔹 Dò mã xác minh trong từng email
+    for m in messages:
+        if not m.get("code"):
+            html_content = m.get("message", "")
+            code = extract_auth_code(html_content)
+            if code:
+                m["code"] = code
 
+    # 🔹 Lọc những email có mã
+    messages_with_code = [m for m in messages if m.get("code")]
     if not messages_with_code:
-        return {
-            "status": "error",
-            "message": f"Không tìm thấy mã xác thực (auth code) trong email {email}."
-        }
+        return {"status": "error", "message": f"Không tìm thấy mã xác minh trong hộp thư {email}."}
 
+    # 🔹 Lấy email mới nhất (uid lớn nhất)
     latest_msg = sorted(messages_with_code, key=lambda x: x.get("uid", 0))[-1]
 
     return {

@@ -1,4 +1,7 @@
 import re, shlex, json, requests
+from datetime import datetime, timezone
+from logzero import logger
+from bs4 import BeautifulSoup
 
 try:
     import curlconverter
@@ -6,6 +9,29 @@ try:
 except Exception:
     HAS_CONVERTER = False
 
+
+def to_utc_isoformat(t):
+    """
+    Chuyển '2025-11-10 04:33:25.871598' → '2025-11-10T04:33:25Z'
+    """
+    try:
+        dt = parse_time(t)
+        if dt == datetime.min:
+            return t
+        # Gán timezone UTC
+        dt = dt.replace(tzinfo=timezone.utc)
+        # Bỏ microsecond, chỉ giữ tới giây
+        dt = dt.replace(microsecond=0)
+        # Xuất ra ISO 8601 UTC (đuôi Z)
+        return dt.isoformat().replace("+00:00", "Z")
+    except Exception:
+        return t
+
+def parse_time(t):
+    try:
+        return datetime.strptime(t, "%Y-%m-%d %H:%M:%S.%f")
+    except Exception:
+        return datetime.min
 
 def normalize_phone_number(raw_number: str):
     """
@@ -41,12 +67,7 @@ def normalize_phone_number(raw_number: str):
     return digits, name
 
 def strip_proxy(c: str) -> str:
-    """
-    Xoá phần `--proxy` và ký tự '\' ngay trước nó trong chuỗi curl.
-    Ví dụ:
-        --proxy http://localhost:9495
-        hoặc  \ --proxy 'http://localhost:9495'
-    """
+
     if not c:
         return c
 
@@ -90,6 +111,38 @@ def parse_curl(c):
     h.pop("Host", None)
     return {"method": m, "url": u, "headers": h, "data": d}
 
+def extract_auth_code(html_content: str) -> str | None:
+    """
+    Trích mã xác minh (4–8 chữ số) từ nội dung HTML email.
+    - Ưu tiên vùng có chứa "code", "verify", "xác minh"
+    - Bỏ qua các số trong CSS, màu (#fff), px, %, rgba,...
+    """
+    if not html_content:
+        return None
+
+    # 🔹 Cắt vùng có chứa "code" / "verify" / "xác minh" (nếu có)
+    match_section = re.search(r"(?is)(.{0,200}(code|verify|xác minh).{0,200})", html_content)
+    snippet = match_section.group(0) if match_section else html_content
+
+    # 🔹 Bước 1: tìm dãy số 4–8 chữ số gần từ khóa code/verify/xác minh
+    match = re.search(r"(?i)(?:code|verify|xác minh)[^0-9]{0,20}(\d{4,8})", snippet)
+    if match:
+        return match.group(1)
+
+    # 🔹 Bước 2: fallback – tìm trong các thẻ HTML (b, strong, span, p, div)
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+        for tag in soup.find_all(["b", "strong", "span", "p", "div"]):
+            text = tag.get_text(strip=True)
+            # Bỏ qua số trong định dạng style
+            if not text or re.search(r"(px|rgb|rgba|#|%)", text):
+                continue
+            if re.fullmatch(r"\d{4,8}", text):
+                return text
+    except Exception as e:
+        logger.warning(f"Lỗi BeautifulSoup khi parse HTML: {e}")
+
+    return None
 
 def run_curl(curl_text):
     c = strip_proxy(curl_text)

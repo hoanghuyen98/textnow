@@ -6,9 +6,26 @@ from django.contrib.auth.models import User
 from django.core.validators import RegexValidator
 from django.db.models import Q
 from django.db import transaction
-from .models import PhoneAccount  # tránh circular import
+from .models import PhoneAccount, AppleMailProxy  # tránh circular import
 from logzero import logger
 import random, string
+
+class AppleMailProxySerializer(serializers.ModelSerializer):
+    employee_name = serializers.CharField(source="employee.user.username", read_only=True)
+
+    class Meta:
+        model = AppleMailProxy
+        fields = [
+            "id",
+            "employee",
+            "employee_name",
+            "mail",
+            "proxy_ip",
+            "note",
+            "created_at",
+            "updated_at",
+        ]
+        read_only_fields = ["created_at", "updated_at"]
 
 class EmployeeGroupSerializer(serializers.ModelSerializer):
     class Meta:
@@ -188,34 +205,24 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
       return fields, curl_text.strip()
 
 
-    # =====================================================
-    # 🔹 Hàm con: kiểm tra trùng trong DB
-    # =====================================================
     def check_duplicate_in_db(self, field_name, field_values):
         """
         Kiểm tra field OAuth trùng trong DB.
         Trả về list các key bị trùng (nếu có)
         """
-        if not field_values:
-            return []
-
-        duplicates = []
-        for key, value in field_values.items():
-            if not value:
-                continue
+        print("field_name: ", field_name)
+        if field_values:
             # dùng icontains để tránh lỗi None
-            if PhoneAccount.objects.filter(**{f"{field_name}": value}).exists():
-                duplicates.append(key)
-        return duplicates
-    # =========================================================
-    # ✅ Validate tổng hợp
-    # =========================================================
+            print(PhoneAccount.objects.filter(**{f"{field_name}": field_values}).first())
+            if PhoneAccount.objects.filter(**{f"{field_name}": field_values}).exists():
+                print("flkdsjflkdsj")
+                return True
+            print("chua ton tai")
+        return False
+
+
     def validate(self, data):
         errors = {}
-        print('dataL ', data)
-        # =====================================================
-        # 🔹 Chuẩn hoá & xác định số điện thoại
-        # =====================================================
         raw_name = data.get("name") 
         normalize_name = self.normalize_name(raw_name)
         normalize_phone = self.normalize_phone(raw_name)
@@ -223,7 +230,6 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
         logger.info('normalize_phone: ', normalize_phone)
         data["name"] = normalize_name
         data["phone"] = normalize_phone
-
 
         # Nếu không có hoặc không đúng định dạng (XXX) XXX-XXXX
         if not normalize_name:
@@ -237,24 +243,13 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
         batch_fields, batch_text = self.extract_oauth_fields(data.get("batch"))
         message_fields, message_text = self.extract_oauth_fields(data.get("message"))
         media_fields, media_text = self.extract_oauth_fields(data.get("media"))
-            # =====================================================
-        # 🔹 Kiểm tra trùng toàn bộ text trong từng cột riêng biệt
-        # =====================================================
-        if batch_text and PhoneAccount.objects.filter(batch__icontains=batch_text).exists():
-            errors["batch"] = "API batch này đã tồn tại trong hệ thống."
-
-        if message_text and PhoneAccount.objects.filter(message__icontains=message_text).exists():
-            errors["message"] = "PI message này đã tồn tại trong hệ thống."
-
-        if media_text and PhoneAccount.objects.filter(media__icontains=media_text).exists():
-            errors["media"] = "API media này đã tồn tại trong hệ thống."
-
+ 
         # =====================================================
         # 🔹 Kiểm tra trùng lặp OAuth key trong DB
         # =====================================================
-        batch_dupes = self.check_duplicate_in_db("batch", batch_fields)
-        message_dupes = self.check_duplicate_in_db("message", message_fields)
-        media_dupes = self.check_duplicate_in_db("media", media_fields)
+        batch_dupes = self.check_duplicate_in_db("batch", batch_text)
+        message_dupes = self.check_duplicate_in_db("message", message_text)
+        media_dupes = self.check_duplicate_in_db("media", media_text)
 
         if batch_dupes:
             errors["batch"] = "API batch này đã tồn tại trong hệ thống."
@@ -272,7 +267,6 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
         # =====================================================
         # 🔹 Trả lỗi nếu có
         # =====================================================
-        print('errors:')
         if errors:
             raise serializers.ValidationError(errors)
 
@@ -280,6 +274,7 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
 
 class PhoneOfCustomerSimpleSerializer(serializers.ModelSerializer):
     """Serializer rút gọn của group: chỉ lấy id và name"""
+    status  = serializers.CharField(source="get_status_display", read_only=True)
     class Meta:
         model = PhoneAccount
         fields = ["id", "name", "phone", "status"]

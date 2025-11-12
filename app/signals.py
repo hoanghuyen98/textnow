@@ -4,8 +4,10 @@ from .models import Customer
 
 @receiver(post_delete, sender=Customer)
 def delete_user_when_customer_deleted(sender, instance, **kwargs):
-    """
-    Khi Customer bị xóa -> tự động xóa luôn User tương ứng
-    """
-    if instance.user:
-        instance.user.delete()
+    try:
+        user = getattr(instance, "user", None)
+        if user and getattr(user, "id", None):
+            user.delete()
+    except Exception as e:
+        # Không để lỗi này làm fail API
+        print(f"[Signal Warning] Không thể xóa user liên quan: {e}")

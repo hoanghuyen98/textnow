@@ -16,6 +16,7 @@ router.register(r'employee_group', views.EmployeeGroupViewSet, basename='employe
 router.register(r'employees', views.EmployeeViewSet, basename='employee')
 router.register(r"customers", views.CustomerViewSet, basename="customer")
 router.register(r"purchased-mails", views.PurchasedMailViewSet, basename="purchased-mail")
+router.register(r"applemail", views.AppleMailProxyViewSet, basename="applemail")
 
 urlpatterns = [
     path("test-throttle/", views.TestThrottleView.as_view()),
@@ -41,7 +42,7 @@ urlpatterns = [
 
     # Mail 
     path("mail_categories/", views.MailCategoriesView.as_view(), name="mail_categories"),
-    path("delete_mail/", views.PurchasedMailBulkDeleteView.as_view(), name="delete_mail"),
+    path("delete_all_mails/", views.PurchasedMailBulkDeleteView.as_view(), name="delete_all_mails"),
     
     path("buy_mail/", views.BuyMailView.as_view(), name="buy_mail"),
     path("get_auth_code/", views.GetAuthCodeView.as_view(), name="get_auth_code"),
