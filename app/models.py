@@ -112,10 +112,18 @@ class PhoneAccount(models.Model):
         blank=True
     )
 
+    purchased_mail = models.ForeignKey(
+        'PurchasedMail',
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name='used_by_phones'
+    )
+
     name = models.CharField(max_length=20, null=True)
     phone = models.CharField(max_length=20, unique=True, db_index=True)
     mail = models.EmailField(blank=True, null=True)
-    provider = models.CharField(max_length=30, null=True, blank=True)
+    provider = models.CharField(max_length=30, default="Pinger/Textfree")
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="live")
     is_used = models.BooleanField(default=False)
     # --- Lưu nội dung curl ---
@@ -185,13 +193,6 @@ class AppleMailProxy(models.Model):
     mail = models.EmailField(unique=True)
     proxy_ip = models.CharField(max_length=50, blank=True, null=True)
     note = models.CharField(max_length=255, blank=True, null=True)
-    creator = models.ForeignKey(
-        'Employee',
-        on_delete=models.CASCADE,
-        related_name='created_apple_mail',
-        null=True,
-        blank=True
-    )
 
     created_at = models.DateTimeField(auto_now_add=True)
     updated_at = models.DateTimeField(auto_now=True)

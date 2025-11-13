@@ -5,6 +5,7 @@ from .models import PhoneAccount
 from .utils import run_curl  # hoặc import đúng đường dẫn bạn đang dùng
 from django.utils import timezone
 from datetime import timedelta
+from logzero import logger
 
 @shared_task
 def check_phone_all_batches():
@@ -24,7 +25,6 @@ def check_phone_all_batches():
     failed = 0
     locked = 0
     logs = []
-
     # ✅ chỉ lấy các số live, chưa bị die/lock, và chưa được sử dụng
     phone_qs = PhoneAccount.objects.exclude(
         status__in=["die", "die_use", "lock"]
@@ -36,12 +36,19 @@ def check_phone_all_batches():
         total += 1
         curl_text = phone.batch
 
-        if not curl_text:
+        if not curl_text or not curl_text.strip():
+            phone.status = "die"
+            phone.updated_at = now
+            phone.save()
+            died += 1
+            msg = "❌ Không có batch → Đánh die"
             logs.append({
                 "phone": phone.phone,
-                "status": "skip",
-                "message": "⚪ Không có batch để kiểm tra"
+                "status": "die",
+                "message": msg,
+                "checked_at": now.strftime("%Y-%m-%d %H:%M:%S"),
             })
+            print(f"[{phone.phone}] {msg}")
             continue
 
         result = run_curl(curl_text)

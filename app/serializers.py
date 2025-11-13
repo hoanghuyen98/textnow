@@ -226,8 +226,6 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
         raw_name = data.get("name") 
         normalize_name = self.normalize_name(raw_name)
         normalize_phone = self.normalize_phone(raw_name)
-        logger.info('normalize_name: ', normalize_name)
-        logger.info('normalize_phone: ', normalize_phone)
         data["name"] = normalize_name
         data["phone"] = normalize_phone
 
@@ -274,10 +272,10 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
 
 class PhoneOfCustomerSimpleSerializer(serializers.ModelSerializer):
     """Serializer rút gọn của group: chỉ lấy id và name"""
-    status  = serializers.CharField(source="get_status_display", read_only=True)
+    status_display  = serializers.CharField(source="get_status_display", read_only=True)
     class Meta:
         model = PhoneAccount
-        fields = ["id", "name", "phone", "status"]
+        fields = ["id", "name", "phone", "status", "status_display"]
 
 
 class CustomerAutoCreateSerializer(serializers.Serializer):
@@ -300,19 +298,12 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
         logger.info(phone_count)
         logger.info("check")
         all_obj = PhoneAccount.objects.all()
-        all_obj = PhoneAccount.objects.all()
-
-        for obj in all_obj:
-            print(f"id={obj.id}, phone={obj.phone}, status='{obj.status}', is_used={obj.is_used}")
-        logger.info(all_obj)
 
         available_phones = (
             PhoneAccount.objects.filter(status="live", is_used=False)
-            .order_by("created_at")[: phone_count * 2]
+            .order_by("created_at")[:phone_count]
         )
-        logger.info(available_phones)
 
-        
         if available_phones.count() == 0:
             return {
                 "status": "error",

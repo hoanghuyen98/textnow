@@ -121,8 +121,6 @@ def buy_mail_sellmmo(employee, product_id: str, amount: int = 1, coupon: str = "
     try:
         resp = requests.post(url, data=payload, timeout=15)
         data = resp.json()
-        
-        print("[SellMMO] response:", data)
     except Exception as e:
         logger.error(f"Lỗi khi gọi API SellMMO: {e}")
         return {"status": "error", "message": f"Lỗi hệ thống mua mail"}
@@ -279,7 +277,6 @@ def get_auth_code(email: str, refresh_token: str, client_id: str):
     try:
         resp = requests.post(url, json=payload, timeout=20)
         data = resp.json()
-        print("📩 DongVan response:", data)
     except Exception as e:
         logger.error(f"Lỗi khi gọi API DongVan: {e}")
         return {"status": "error", "message": "Lỗi hệ thống khi gọi API DongVan."}

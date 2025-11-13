@@ -43,7 +43,6 @@ from .exceptions import BadRequest, Unauthorized, NotFound
 
 logger = logging.getLogger(__name__)
 
-# ===== Views =====
 def customer_home(request):
     return render(request, "customer.html")
 
@@ -172,30 +171,78 @@ class AppleMailProxyViewSet(viewsets.ReadOnlyModelViewSet):
     throttle_scope = "medium"
 
     def list(self, request, *args, **kwargs):
-        latest_record = self.get_queryset().first()
-        if not latest_record:
+        user = request.user
+        employee = getattr(user, "employee_profile", None)
+        # Nếu nhân viên thuộc role staff → chỉ trả bản ghi của chính họ
+        if employee:
+            if employee.role == "staff":
+                record = AppleMailProxy.objects.filter(employee=employee).order_by("-created_at").first()
+
+                if not record:
+                    return Response(
+                        {
+                            "status": "error",
+                            "message": "Nhân viên chưa có bản ghi AppleMailProxy nào",
+                            "data": None,
+                        },
+                        status=status.HTTP_200_OK
+                    )
+
+                serializer = self.get_serializer(record)
+                return Response(
+                    {
+                        "status": "success",
+                        "message": "Lấy bản ghi AppleMailProxy thành công.",
+                        "data": serializer.data,
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            # Nếu admin → lấy bản ghi mới nhất toàn hệ thống
+            latest_record = self.get_queryset().first()
+            if not latest_record:
+                return Response(
+                    {
+                        "status": "error",
+                        "message": "Không có bản ghi nào trong AppleMailProxy.",
+                        "data": None,
+                    },
+                    status=status.HTTP_200_OK
+                )
+
+            serializer = self.get_serializer(latest_record)
             return Response(
                 {
-                    "status": "error",
-                    "message": "Không có bản ghi nào trong AppleMailProxy.",
-                    "data": None,
+                    "status": "success",
+                    "message": "Lấy bản ghi AppleMailProxy mới nhất thành công.",
+                    "data": serializer.data,
                 },
                 status=status.HTTP_200_OK
             )
-
-        serializer = self.get_serializer(latest_record)
         return Response(
             {
-                "status": "success",
-                "message": "Lấy bản ghi AppleMailProxy mới nhất thành công.",
-                "data": serializer.data,
+                "status": "error",
+                "message": "User không tồn tại.",
+                "data": None,
             },
             status=status.HTTP_200_OK
         )
-
-
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
+        user = request.user
+        employee = getattr(user, "employee_profile", None)
+
+        # Staff chỉ được xem bản ghi của mình
+        if employee and employee.role == "staff":
+            if instance.employee != employee:
+                return Response(
+                    {
+                        "status": "error",
+                        "message": "Bạn không có quyền xem bản ghi này.",
+                    },
+                    status=status.HTTP_403_FORBIDDEN
+                )
+
         serializer = self.get_serializer(instance)
         return Response(
             {
@@ -203,7 +250,7 @@ class AppleMailProxyViewSet(viewsets.ReadOnlyModelViewSet):
                 "message": "Lấy chi tiết AppleMailProxy thành công.",
                 "data": serializer.data,
             },
-            status=status.HTTP_200_OK,
+            status=status.HTTP_200_OK
         )
 
 class EmployeeGroupViewSet(viewsets.ModelViewSet):
@@ -702,68 +749,109 @@ class CreatePhoneAccountView(APIView):
         responses={201: "Phone created successfully", 400: "Validation failed"}
     )
     def post(self, request):
-        data = request.data.copy()
-        data["creator"] = request.user.id
-        print('request.user.id: ', request.user.id)
-        email = data.get("mail") or data.get("email")
-        employee = request.user.employee_profile
-        print('emplpyee: ', employee)
-        if not email:
-            return Response(
-                {"status": "error", "message": "Thiếu email để gán cho PhoneAccount."},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        purchased_mail = PurchasedMail.objects.filter(email=email, purchase__employee=employee).first()
-
-        print('purchased_mail: ', purchased_mail)
-        if purchased_mail:
-            if purchased_mail.is_used:
-              return Response(
-                  {"status": "error", "message": f"Email '{email}' đã được sử dụng cho tài khoản khác."},
-                  status=status.HTTP_400_BAD_REQUEST
-              )
-        # --- Giải mã base64 cho batch/message/media ---
-        for field in ["batch", "message", "media"]:
-            if field in data and data[field]:
-                try:
-                    decoded = base64.b64decode(data[field]).decode("utf-8")
-                    data[field] = decoded
-                except Exception:
-                    pass
-                data[field] = strip_proxy(data[field])
-
-        # --- Validate serializer ---
-        serializer = PhoneAccountSerializer(data=data)
-        if not serializer.is_valid():
-            return Response(
-                {"status": "fail", "detail": serializer.errors},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-        phone_obj = serializer.save(creator=request.user.employee_profile)
-
         try:
-            result = run_curl(phone_obj.batch)
-            if "error" in result or result.get("status", 0) >= 400:
+            data = request.data.copy()
+            data["creator"] = request.user.id
+
+            employee = request.user.employee_profile
+            email = data.get("mail") or data.get("email")
+
+            if not email:
+                return Response(
+                    {"status": "error", "message": "Thiếu email để gán cho PhoneAccount."},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # 🔍 1. Kiểm tra mail có trong PurchasedMail không
+            purchased_mail = PurchasedMail.objects.filter(
+                email=email,
+                purchase__employee=employee
+            ).first()
+
+            if not purchased_mail:
+                return Response(
+                    {
+                        "status": "error",
+                        "message": f"Email '{email}' chưa được mua hoặc không thuộc về nhân viên này."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # 🔍 2. Mail đã sử dụng rồi thì không cho tạo
+            if purchased_mail.is_used:
+                return Response(
+                    {
+                        "status": "error",
+                        "message": f"Email '{email}' đã được sử dụng cho tài khoản khác."
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # 🔍 3. Giải mã base64 nếu có
+            for field in ["batch", "message", "media"]:
+                if field in data and data[field]:
+                    try:
+                        decoded = base64.b64decode(data[field]).decode("utf-8")
+                        data[field] = strip_proxy(decoded)
+                    except Exception:
+                        # Nếu decode fail thì giữ nguyên
+                        data[field] = strip_proxy(data[field])
+
+            # 🔍 4. Validate serializer
+            serializer = PhoneAccountSerializer(data=data)
+            if not serializer.is_valid():
+                return Response(
+                    {
+                        "status": "fail",
+                        "detail": serializer.errors
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            # 🔍 5. Tạo phone, gán purchased_mail
+            phone_obj = serializer.save(
+                creator=employee,
+                purchased_mail=purchased_mail
+            )
+
+            # 🔍 6. Gọi curl để test live/die
+            try:
+                result = run_curl(phone_obj.batch)
+                if "error" in result or result.get("status", 0) >= 400:
+                    phone_obj.status = "die"
+                else:
+                    phone_obj.status = "live"
+            except Exception as e:
+                print("Exception while testing curl:", e)
                 phone_obj.status = "die"
-            else:
-                phone_obj.status = "live"
+
+            phone_obj.save(update_fields=["status"])
+
+            # 🔍 7. Đánh dấu mail đã dùng
+            purchased_mail.is_used = True
+            purchased_mail.save(update_fields=["is_used"])
+
+            return Response(
+                {
+                    "status": "success",
+                    "message": f"Tạo Phone thành công (trạng thái: {phone_obj.status})",
+                    "phone": phone_obj.phone,
+                    "email": email,
+                    "mail_status": "marked_used",
+                    "creator": request.user.username
+                },
+                status=status.HTTP_201_CREATED
+            )
+
         except Exception as e:
-            print("Exception while testing curl:", e)
-            phone_obj.status = "die"
-
-        phone_obj.save(update_fields=["status"])
-
-        return Response(
-            {
-                "status": "success",
-                "message": f"Tạo Phone thành công (trạng thái: {phone_obj.status})",
-                "phone": phone_obj.phone,
-                "email": email,
-                "mail_status": "marked_used",
-                "creator": request.user.username
-            },
-            status=status.HTTP_201_CREATED
-        )
+            logger.error(f"Lỗi khi tạo PhoneAccount: {e}")
+            return Response(
+                {
+                    "status": "error",
+                    "message": "Lỗi hệ thống khi tạo PhoneAccount."
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 
 class RefreshInboxView(APIView):
@@ -855,10 +943,11 @@ class RefreshInboxView(APIView):
                     continue
 
                 new_comms = sub_body.get("result", {}).get("newCommunications", [])
-
                 for msg in new_comms:
                     direction = msg.get("direction")
                     text = msg.get("text", "")
+                    is_new_conversation = msg.get("isNewConversation", "")
+                    my_status = msg.get("myStatus")
                     media = msg.get("media", {}).get("image") if msg.get("media") else None
                     time_created = to_utc_isoformat(msg.get("timeCreated"))
                     if direction == "out":
@@ -890,8 +979,10 @@ class RefreshInboxView(APIView):
                     conversations.setdefault(other_number, []).append({
                         "direction": direction,
                         "text": text,
+                        "my_status": my_status,
                         "image": media,
-                        "time": time_created
+                        "time": time_created,
+                        "is_new_conversation": is_new_conversation
                     })
 
             # --- Chuẩn hóa kết quả ---
@@ -1370,6 +1461,7 @@ class ListPurchasedMailsView(APIView):
             "mails": serializer.data
         }, status=status.HTTP_200_OK)
 
+
 class SaveAppleMailView(APIView):
     """
     ✅ API: Lưu hoặc cập nhật Apple Mail & Proxy
@@ -1409,7 +1501,6 @@ class SaveAppleMailView(APIView):
                 mail=mail.strip().lower(),
                 proxy_ip=proxy_ip.strip(),
                 employee=employee,
-                creator=employee
             )
 
             return Response({
@@ -1545,11 +1636,13 @@ class EmployeePhoneSummaryView(APIView):
                 creator=employee,
                 created_at__date=today
             )
-
+            print('pinger_today_qs: ', pinger_today_qs)
             pinger_today = pinger_today_qs.count()
             pinger_today_live = pinger_today_qs.filter(status="live").count()
-            pinger_today_die = pinger_today_qs.filter(status="die").count()
-
+            pinger_today_die = pinger_today_qs.filter(
+                Q(status="die") | Q(status="die_use") | Q(status="lock")
+            ).count()
+            
             pinger_month = PhoneAccount.objects.filter(
                 provider="Pinger/Textfree",
                 creator=employee,
@@ -1750,7 +1843,7 @@ class PhoneReportView(APIView):
             .annotate(
                 total_sdt=Count("id"),
                 healthy=Count("id", filter=Q(status="live")),
-                total_disabled=Count("id", filter=~Q(status__in=["live", "lock"])),
+                total_disabled=Count("id", filter=~Q(status__in=["die", "lock"])),
                 disabled_at_import=Count("id", filter=Q(status="die", is_used=False)),
                 disabled_after_use=Count("id", filter=Q(status="lock", is_used=True)),
             )
@@ -1785,7 +1878,7 @@ class PhoneReportView(APIView):
             .annotate(
                 total_sdt=Count("id"),
                 healthy=Count("id", filter=Q(status="live")),
-                total_disabled=Count("id", filter=~Q(status__in=["live", "lock"])),
+                total_disabled=Count("id", filter=~Q(status__in=["die", "lock"])),
                 disabled_at_import=Count("id", filter=Q(status="die", is_used=False)),
                 disabled_after_use=Count("id", filter=Q(status="lock", is_used=True)),
             )
