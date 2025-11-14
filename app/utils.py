@@ -251,6 +251,6 @@ def send_pinger_message(
         "status": "status",
         "status_code": resp.status_code,
         "response": result,
-        "message": "Gửi ảnh thành công",
+        "message": "Image message sent successfully.",
         "body_sent": body,
     }

@@ -275,7 +275,7 @@ class PhoneOfCustomerSimpleSerializer(serializers.ModelSerializer):
     status_display  = serializers.CharField(source="get_status_display", read_only=True)
     class Meta:
         model = PhoneAccount
-        fields = ["id", "name", "phone", "status", "status_display"]
+        fields = ["id", "name", "phone", "status", "status_display", "created_at"]
 
 
 class CustomerAutoCreateSerializer(serializers.Serializer):

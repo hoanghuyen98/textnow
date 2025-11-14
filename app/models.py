@@ -3,23 +3,6 @@ import hashlib
 from django.contrib.auth.models import User
 
 
-class Customer(models.Model):
-    user = models.OneToOneField(
-        User,
-        on_delete=models.CASCADE,
-        related_name="customer_profile"
-    )
-    raw_password = models.TextField(blank=True, null=True)
-    phone_assigned_count = models.PositiveIntegerField(default=0)
-
-    def __str__(self):
-        return f"{self.user.username}"
-
-    def delete(self, *args, **kwargs):
-        if self.user:
-            self.user.delete()
-        super().delete(*args, **kwargs)
-
 class EmployeeGroup(models.Model):
     name = models.CharField(max_length=100)
 

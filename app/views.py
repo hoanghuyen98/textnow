@@ -8,7 +8,7 @@ from django.contrib.auth import authenticate, login, logout
 from rest_framework.decorators import action
 from .serializers import PhoneAccountSerializer, CustomerSerializer, PurchasedMailSerializer, EmployeeGroupSerializer, EmployeeSerializer, GetAuthCodeSerializer, PurchasedMailSerializer,CreatePhoneAccountSerializer, MailCategoriesViewSerializer, CustomerAutoCreateSerializer, AppleMailProxySerializer
 from rest_framework.response import Response
-from django.db.models import Count, Q
+from django.db.models import Count, Q, OuterRef, Subquery, Min
 from rest_framework.decorators import api_view, permission_classes
 import base64
 from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer, MailTransaction, AppleMailProxy
@@ -34,7 +34,7 @@ from datetime import datetime
 from .tasks import check_phone_all_batches
 from rest_framework.throttling import ScopedRateThrottle
 from drf_yasg import openapi
-
+from .response_messages import PHONE_MESSAGES, INBOX_MESSAGES, SEND_MESSAGE_MESSAGES, SEND_MEDIA_MESSAGES
 
 from collections import OrderedDict
 from logzero import logger
@@ -52,6 +52,7 @@ class TestThrottleView(APIView):
 
     def get(self, request):
         return Response({"message": "OK"})
+
 
 class CheckStatusView(APIView):
     """
@@ -99,6 +100,7 @@ class CustomTokenObtainPairView(TokenObtainPairView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "login"
 
+
 class CustomTokenRefreshSerializer(TokenRefreshSerializer):
     def validate(self, attrs):
         # Bọc super().validate để chặn lỗi người dùng không tồn tại / token lỗi
@@ -133,6 +135,7 @@ class CustomTokenRefreshView(TokenRefreshView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "token_refresh"
 
+
 class LogoutView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
@@ -150,9 +153,11 @@ class LogoutView(APIView):
             logger.error(f"error: {str(e)}")
             return Response({"error": "logout fail"}, status=status.HTTP_400_BAD_REQUEST)
 
+
 class StandardResultsSetPagination(PageNumberPagination):
     page_size = 10
     page_size_query_param = 'page_size'
+
 
 class AppleMailProxyViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -227,12 +232,12 @@ class AppleMailProxyViewSet(viewsets.ReadOnlyModelViewSet):
             },
             status=status.HTTP_200_OK
         )
+
     def retrieve(self, request, *args, **kwargs):
         instance = self.get_object()
         user = request.user
         employee = getattr(user, "employee_profile", None)
 
-        # Staff chỉ được xem bản ghi của mình
         if employee and employee.role == "staff":
             if instance.employee != employee:
                 return Response(
@@ -253,6 +258,7 @@ class AppleMailProxyViewSet(viewsets.ReadOnlyModelViewSet):
             status=status.HTTP_200_OK
         )
 
+
 class EmployeeGroupViewSet(viewsets.ModelViewSet):
     queryset = EmployeeGroup.objects.all()
     serializer_class = EmployeeGroupSerializer
@@ -260,9 +266,7 @@ class EmployeeGroupViewSet(viewsets.ModelViewSet):
     allowed_roles = ["admin", "staff"]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "medium"
-    # ---------------------------
-    # ✅ GET DETAIL
-    # ---------------------------
+
     def retrieve(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
@@ -284,9 +288,6 @@ class EmployeeGroupViewSet(viewsets.ModelViewSet):
                 "message": f"Lỗi khi lấy thông tin nhóm"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # ---------------------------
-    # ✅ CREATE (POST)
-    # ---------------------------
     def create(self, request, *args, **kwargs):
         try:
             with transaction.atomic():
@@ -320,9 +321,6 @@ class EmployeeGroupViewSet(viewsets.ModelViewSet):
                 "message": f"Lỗi khi tạo nhóm"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # ---------------------------
-    # ✅ UPDATE (PUT/PATCH)
-    # ---------------------------
     def update(self, request, *args, **kwargs):
         try:
             with transaction.atomic():
@@ -356,9 +354,6 @@ class EmployeeGroupViewSet(viewsets.ModelViewSet):
                 "message": f"Lỗi khi cập nhật nhóm"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # ---------------------------
-    # ✅ DELETE
-    # ---------------------------
     def destroy(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
@@ -389,10 +384,10 @@ class EmployeeViewSet(viewsets.ModelViewSet):
     allowed_roles = ["admin", "staff"]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "light"
+
     def list(self, request, *args, **kwargs):
         queryset = self.filter_queryset(self.get_queryset().order_by('user__username'))
 
-        # áp dụng phân trang
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -532,6 +527,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 "message": f"Lỗi khi xoá nhân viên"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class AutoCreateCustomerView(APIView):
     """
     POST: Truyền vào phone_count → Tự động tạo tài khoản Customer
@@ -570,11 +566,23 @@ class CustomerViewSet(viewsets.ModelViewSet):
     allowed_roles = ["admin", "staff"]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "light"
-    def list(self, request, *args, **kwargs):
-        # Sắp xếp theo tên user hoặc cột fullname, tùy model bạn có
-        queryset = self.filter_queryset(self.get_queryset().order_by("user__username"))
 
-        # Áp dụng phân trang
+    def list(self, request, *args, **kwargs):
+
+        oldest_phone = PhoneAccount.objects.filter(
+            customer=OuterRef("pk")
+        ).order_by("created_at")
+
+        queryset = self.get_queryset().annotate(
+            oldest_phone_created_at=Subquery(
+                oldest_phone.values("created_at")[:1]
+            )
+        ).order_by(
+            "oldest_phone_created_at"      # Cũ → mới
+        )
+
+        queryset = self.filter_queryset(queryset)
+
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
@@ -584,16 +592,13 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 "data": serializer.data
             })
 
-        # Nếu không phân trang (trả full list)
         serializer = self.get_serializer(queryset, many=True)
         return Response({
             "status": "success",
             "message": "Lấy danh sách khách hàng thành công.",
             "data": serializer.data
-        }, status=status.HTTP_200_OK)
-    # ---------------------------
-    # ✅ GET DETAIL
-    # ---------------------------
+        })
+
     def retrieve(self, request, *args, **kwargs):
         try:
             instance = self.get_object()
@@ -615,9 +620,6 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 "message": f"Lỗi khi lấy thông tin khách hàng"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # ---------------------------
-    # ✅ CREATE (POST)
-    # ---------------------------
     def create(self, request, *args, **kwargs):
         try:
             with transaction.atomic():
@@ -651,9 +653,6 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 "message": f"Lỗi khi tạo khách hàng"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # ---------------------------
-    # ✅ UPDATE (PUT/PATCH)
-    # ---------------------------
     def update(self, request, *args, **kwargs):
         try:
             with transaction.atomic():
@@ -689,11 +688,9 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 "message": f"Lỗi khi cập nhật khách hàng"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-    # ---------------------------
-    # ✅ DELETE
-    # ---------------------------
+
     def destroy(self, request, *args, **kwargs):
-        # try:
+        try:
             instance = self.get_object()
             username = instance.user.username if instance.user else instance.name
             instance.delete()
@@ -701,17 +698,17 @@ class CustomerViewSet(viewsets.ModelViewSet):
                 "status": "success",
                 "message": f"Đã xóa khách hàng '{username}' thành công."
             }, status=status.HTTP_200_OK)
-        # except Customer.DoesNotExist:
-        #     return Response({
-        #         "status": "error",
-        #         "message": "Không tìm thấy khách hàng để xóa."
-        #     }, status=status.HTTP_404_NOT_FOUND)
-        # # except Exception as e:
-        #     logger.error(f"Lỗi khi xóa khách hàng: {str(e)}")
-        #     return Response({
-        #         "status": "error",
-        #         "message": f"Lỗi khi xóa khách hàng"
-        #     }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+        except Customer.DoesNotExist:
+            return Response({
+                "status": "error",
+                "message": "Không tìm thấy khách hàng để xóa."
+            }, status=status.HTTP_404_NOT_FOUND)
+        # except Exception as e:
+            logger.error(f"Lỗi khi xóa khách hàng: {str(e)}")
+            return Response({
+                "status": "error",
+                "message": f"Lỗi khi xóa khách hàng"
+            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
 class CustomerInfoView(APIView):
@@ -719,9 +716,9 @@ class CustomerInfoView(APIView):
     allowed_roles = ["admin", "customer"]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "light"
+
     def get(self, request):
         user = request.user
-
         customer = user.customer_profile
         serializer = CustomerSerializer(customer)
 
@@ -744,6 +741,7 @@ class CreatePhoneAccountView(APIView):
     allowed_roles = ["staff", "admin"]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "medium"
+
     @swagger_auto_schema(
         request_body=CreatePhoneAccountSerializer,
         responses={201: "Phone created successfully", 400: "Validation failed"}
@@ -762,7 +760,7 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 🔍 1. Kiểm tra mail có trong PurchasedMail không
+            # 1. Check if purchased mail belongs to employee
             purchased_mail = PurchasedMail.objects.filter(
                 email=email,
                 purchase__employee=employee
@@ -777,7 +775,7 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 🔍 2. Mail đã sử dụng rồi thì không cho tạo
+            # 2. Prevent using purchased mail again
             if purchased_mail.is_used:
                 return Response(
                     {
@@ -787,17 +785,16 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 🔍 3. Giải mã base64 nếu có
+            # 3. Decode base64 fields
             for field in ["batch", "message", "media"]:
                 if field in data and data[field]:
                     try:
                         decoded = base64.b64decode(data[field]).decode("utf-8")
                         data[field] = strip_proxy(decoded)
                     except Exception:
-                        # Nếu decode fail thì giữ nguyên
                         data[field] = strip_proxy(data[field])
 
-            # 🔍 4. Validate serializer
+            # 4. Validate serializer
             serializer = PhoneAccountSerializer(data=data)
             if not serializer.is_valid():
                 return Response(
@@ -808,13 +805,13 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 🔍 5. Tạo phone, gán purchased_mail
+            # 5. Save
             phone_obj = serializer.save(
                 creator=employee,
                 purchased_mail=purchased_mail
             )
 
-            # 🔍 6. Gọi curl để test live/die
+            # 6. Test curl
             try:
                 result = run_curl(phone_obj.batch)
                 if "error" in result or result.get("status", 0) >= 400:
@@ -827,7 +824,7 @@ class CreatePhoneAccountView(APIView):
 
             phone_obj.save(update_fields=["status"])
 
-            # 🔍 7. Đánh dấu mail đã dùng
+            # 7. Mark mail used
             purchased_mail.is_used = True
             purchased_mail.save(update_fields=["is_used"])
 
@@ -865,34 +862,38 @@ class RefreshInboxView(APIView):
     allowed_roles = ["customer", "admin"]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = "light"
+
     def get(self, request):
         phone = request.query_params.get("phone")
-        print('(629) 234-3458: ', phone)
         if not phone:
             return Response(
-                {"status": "error", "message": "Thiếu tham số phone trong query string"},
+                {"status": "error", "message": INBOX_MESSAGES["missing_phone"]},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # --- Lấy thông tin phone ---
+        # --- Fetch PhoneAccount ---
         obj = get_object_or_404(PhoneAccount, name=phone)
+
         if obj.status != "live":
             return Response(
                 {
                     "status": "error",
-                    "message": f"Số {phone} không hợp lệ, không thể load tin nhắn."
+                    "message": INBOX_MESSAGES["invalid_phone"]
                 },
                 status=status.HTTP_400_BAD_REQUEST
             )
+
         if not obj.batch:
             return Response(
-                {"status": "error", "message": f"Không có batch script cho số {phone}"},
+                {
+                    "status": "error",
+                    "message": INBOX_MESSAGES["missing_batch"]
+                },
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # --- Gọi cURL để lấy dữ liệu tin nhắn ---
+        # --- Call cURL ---
         raw_result = run_curl(obj.batch)
-        print("raw_result: ", raw_result)
         if (
             not raw_result
             or raw_result.get("error")
@@ -904,30 +905,32 @@ class RefreshInboxView(APIView):
             return Response(
                 {
                     "status": "error",
-                    "message": "Không thể lấy dữ liệu tin nhắn, đã đổi trạng thái sang 'die_use'.",
+                    "message": INBOX_MESSAGES["curl_failed"],
                     "detail": raw_result,
                 },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
-            
+
         body = raw_result.get("body")
 
-        # --- Parse JSON nếu cần ---
+        # --- Parse JSON ---
         if not isinstance(body, (dict, list)):
             try:
                 body = json.loads(body)
             except Exception:
                 obj.status = "die_use"
                 obj.save(update_fields=["status"])
+
                 return Response(
                     {
                         "status": "error",
-                        "message": "Không parse được dữ liệu trả về",
+                        "message": INBOX_MESSAGES["parse_failed"],
                         "raw": body,
                     },
                     status=status.HTTP_500_INTERNAL_SERVER_ERROR,
                 )
 
+        # --- Extract Messages ---
         contacts = {}
         conversations = {}
 
@@ -936,20 +939,22 @@ class RefreshInboxView(APIView):
                 if "body" not in item:
                     continue
 
-                body_str = item["body"]
                 try:
-                    sub_body = json.loads(body_str)
+                    sub_body = json.loads(item["body"])
                 except Exception:
                     continue
 
                 new_comms = sub_body.get("result", {}).get("newCommunications", [])
+
                 for msg in new_comms:
                     direction = msg.get("direction")
                     text = msg.get("text", "")
-                    is_new_conversation = msg.get("isNewConversation", "")
+                    is_new_conversation = msg.get("isNewConversation")
                     my_status = msg.get("myStatus")
                     media = msg.get("media", {}).get("image") if msg.get("media") else None
                     time_created = to_utc_isoformat(msg.get("timeCreated"))
+
+                    # Determine "other" side
                     if direction == "out":
                         other_info = msg.get("to", [{}])[0]
                     else:
@@ -961,21 +966,20 @@ class RefreshInboxView(APIView):
                     if not other_number:
                         continue
 
-                    # Format tên nếu thiếu
+                    # Auto format name if missing
                     if not other_name:
                         other_name = f"({other_number[:3]}) {other_number[3:6]}-{other_number[6:]}"
 
-                    # Cập nhật contact
+                    # Update contacts with better names
                     if other_number not in contacts:
                         contacts[other_number] = other_name
                     else:
                         prev_name = contacts[other_number]
-                        # Nếu tên cũ chỉ là số, cập nhật tên mới đẹp hơn
-                        if prev_name == other_number or prev_name == f"({other_number[:3]}) {other_number[3:6]}-{other_number[6:]}":
-                            if other_name not in [other_number, f"({other_number[:3]}) {other_number[3:6]}-{other_number[6:]}"]:
-                                contacts[other_number] = other_name
+                        default_format = f"({other_number[:3]}) {other_number[3:6]}-{other_number[6:]}"
+                        if prev_name in [other_number, default_format] and other_name not in [other_number, default_format]:
+                            contacts[other_number] = other_name
 
-                    # Lưu tin nhắn hội thoại
+                    # Save message into conversation
                     conversations.setdefault(other_number, []).append({
                         "direction": direction,
                         "text": text,
@@ -985,12 +989,12 @@ class RefreshInboxView(APIView):
                         "is_new_conversation": is_new_conversation
                     })
 
-            # --- Chuẩn hóa kết quả ---
+            # --- Prepare final result ---
             contact_list = [{"phone": p, "name": n} for p, n in contacts.items()]
 
             return Response({
                 "status": "success",
-                "message": "Lấy lịch sử thành công",
+                "message": INBOX_MESSAGES["success"],
                 "results": {
                     "contacts": contact_list,
                     "conversations": conversations
@@ -998,11 +1002,11 @@ class RefreshInboxView(APIView):
             }, status=status.HTTP_200_OK)
 
         except Exception as e:
-            logger.error(f"Lỗi khi xử lý dữ liệu: {str(e)}")
+            logger.error(f"Error processing inbox data: {str(e)}")
             return Response(
                 {
                     "status": "error",
-                    "message": f"Lỗi khi xử lý dữ liệu",
+                    "message": INBOX_MESSAGES["processing_error"],
                     "raw": body
                 },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
@@ -1023,91 +1027,98 @@ class SendMessageView(APIView):
         phone = request.data.get("phone")
         to_raw = request.data.get("to")
         text = request.data.get("text")
+
         to_number, name = normalize_phone_number(to_raw)
-        # 🧩 Kiểm tra dữ liệu đầu vào
+
+        # === Validate input ===
         if not all([phone, to_number, text]):
             return Response(
-                {"status": "error", "message": "Thiếu các trường bắt buộc: phone / to / text"},
+                {"status": "error", "message": SEND_MESSAGE_MESSAGES["missing_fields"]},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
-        # Chuẩn hóa đầu số (phải bắt đầu bằng 1)
+        # Ensure number begins with 1
         if not to_number.startswith("1"):
             to_number = "1" + to_number
 
         try:
-            # 🔍 Lấy cấu hình cURL từ DB
+            # === Fetch PhoneAccount config ===
             obj = get_object_or_404(PhoneAccount, name=phone)
+
             if obj.status != "live":
-              return Response(
-                  {
-                      "status": "error",
-                      "message": f"Số {phone} không hợp lệ, không thể gửi tin nhắn."
-                  },
-                  status=status.HTTP_400_BAD_REQUEST
-              )
+                return Response(
+                    {
+                        "status": "error",
+                        "message": SEND_MESSAGE_MESSAGES["invalid_phone"]
+                    },
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
             curl_text = obj.message
             if not curl_text:
                 return Response(
-                    {"status": "error", "message": f"Không có message cURL cho số {phone}"},
+                    {
+                        "status": "error",
+                        "message": SEND_MESSAGE_MESSAGES["missing_curl"]
+                    },
                     status=status.HTTP_404_NOT_FOUND
                 )
 
-            # 🧹 Xóa phần "media": {...} trong cURL (nếu có)
+            # === Remove media from existing cURL ===
             curl_text = re.sub(r',?\s*"media"\s*:\s*\{[^}]*\}', '', curl_text)
 
-            # 🧱 Body mới (thay text/to)
+            # === Replace payload body ===
             new_body = {
                 "text": text,
-                "to": [
-                    {
-                        "name": name,
-                        "TN": to_number
-                    }
-                ]
+                "to": [{"name": name, "TN": to_number}]
             }
             body_str = json.dumps(new_body, ensure_ascii=False)
 
-            # 🧩 Thay body cũ trong cURL bằng body mới
             updated_curl = re.sub(
                 r'(--data-raw\s*\')[^\']*(\')',
                 f"--data-raw '{body_str}'",
                 curl_text
             )
 
-            print("✅ Updated cURL:\n", updated_curl)
+            print("Updated cURL:\n", updated_curl)
 
-            # 📨 Gửi tin nhắn thật qua Pinger API
+            # === Send actual message ===
             result = send_pinger_message(
                 message_curl=updated_curl,
                 to_number=to_number,
                 text=text,
                 name=name
             )
-            print("📬 Result:", result)
 
             status_code = result.get("status_code", 200)
             response_data = result.get("response", {})
 
-            # Nếu có lỗi errNo từ server → chuyển sang lỗi 400
+            # errNo from Pinger → error
             if isinstance(response_data, dict) and "errNo" in response_data:
                 status_code = 400
 
-            return Response({
-                "status": "success" if status_code == 200 else "error",
-                "sent_to": to_number,
-                "sent_to_name": name,
-                "text": text,
-                "status_code": status_code,
-                "response": response_data
-            }, status=status_code)
+            return Response(
+                {
+                    "status": "success" if status_code == 200 else "error",
+                    "message": SEND_MESSAGE_MESSAGES["success"] if status_code == 200 else SEND_MESSAGE_MESSAGES["send_failed"],
+                    "sent_to": to_number,
+                    "sent_to_name": name,
+                    "text": text,
+                    "status_code": status_code,
+                    "response": response_data
+                },
+                status=status_code
+            )
 
         except Exception as e:
-            logger.error("Lỗi khi gửi tin nhắn:", str(e))
-            return Response({
-                "status": "error",
-                "message": f"Không gửi được tin nhắn"
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+            logger.error("Error sending message: %s", str(e))
+            return Response(
+                {
+                    "status": "error",
+                    "message": SEND_MESSAGE_MESSAGES["send_failed"]
+                },
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
 
 class SendMediaView(APIView):
     """
@@ -1123,33 +1134,34 @@ class SendMediaView(APIView):
     allowed_roles = ["customer", "admin"]
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'heavy'
+
     def post(self, request):
-        print("---------------------")
         phone = request.data.get("phone")
         to_raw = request.data.get("to")
         to_number, name = normalize_phone_number(to_raw)
 
         file = request.FILES.get("file")
 
-        # Chuẩn hóa đầu số (phải bắt đầu bằng 1)
+        # Ensure number starts with 1
         if not to_number.startswith("1"):
             to_number = "1" + to_number
 
-        # 🧩 Kiểm tra dữ liệu đầu vào
+        # === Validate input ===
         if not all([phone, to_number, file]):
             return Response(
-                {"status": "error", "message": "Thiếu các trường bắt buộc: phone / to / file"},
+                {"status": "error", "message": SEND_MEDIA_MESSAGES["missing_fields"]},
                 status=status.HTTP_400_BAD_REQUEST
             )
 
         try:
-            # 🔍 Lấy tài khoản Pinger tương ứng
+            # === Fetch Pinger account config ===
             obj = get_object_or_404(PhoneAccount, name=phone)
+
             if obj.status != "live":
                 return Response(
                     {
                         "status": "error",
-                        "message": f"Số {phone} không hợp lệ, không thể gửi tin nhắn."
+                        "message": SEND_MEDIA_MESSAGES["invalid_phone"]
                     },
                     status=status.HTTP_400_BAD_REQUEST
                 )
@@ -1157,11 +1169,14 @@ class SendMediaView(APIView):
             curl_text = obj.media
             if not curl_text:
                 return Response(
-                    {"status": "error", "message": f"Không có media cURL cho số {phone}"},
+                    {
+                        "status": "error",
+                        "message": SEND_MEDIA_MESSAGES["missing_curl"]
+                    },
                     status=status.HTTP_404_NOT_FOUND
                 )
 
-            # 🧹 Parse lại cURL & chuẩn bị headers upload
+            # === Parse cURL and prepare headers ===
             parsed = parse_curl(strip_proxy(curl_text))
             url = parsed.get("url")
             headers = parsed.get("headers", {}) or {}
@@ -1178,23 +1193,20 @@ class SendMediaView(APIView):
             for h in ["Accept-Encoding", "Transfer-Encoding", "Content-Length"]:
                 headers.pop(h, None)
 
-            # 🧾 Bước 1: Upload ảnh
+            # === Step 1: Upload image ===
             try:
                 resp = requests.post(url, headers=headers, data=file.file, timeout=60)
-                upload_text = resp.text
-                print('upload_text: ' , upload_text)
-
             except Exception as e:
-                logger.error("Lỗi upload ảnh:", str(e))
+                logger.error("Image upload failed: %s", str(e))
                 return Response({
                     "status": "error",
                     "sent_to": to_number,
                     "uploaded_image_url": "(upload_failed)",
                     "status_code": 500,
-                    "message": "Lỗi khi upload ảnh."
+                    "message": SEND_MEDIA_MESSAGES["upload_error"]
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            # 🧾 Bước 2: Parse phản hồi upload
+            # === Step 2: Parse upload response ===
             try:
                 upload_json = resp.json()
             except Exception:
@@ -1212,34 +1224,36 @@ class SendMediaView(APIView):
                     "status": "error",
                     "sent_to": to_number,
                     "uploaded_image_url": "(upload_failed)",
-                    "status_code": 500,
-                    "message": "Upload response không có URL hợp lệ."
+                    "status_code": 400,
+                    "message": SEND_MEDIA_MESSAGES["invalid_upload_url"]
                 }, status=status.HTTP_400_BAD_REQUEST)
 
-            # 📨 Bước 3: Gửi ảnh qua message API
+            # === Step 3: Send media message via message API ===
             try:
                 send_result = send_pinger_message(
                     message_curl=obj.message,
                     to_number=to_number,
-                    text=" ",  # bắt buộc phải có text field
+                    text=" ",  # required field
                     media_url=uploaded_image_url,
                     name=name,
                 )
             except Exception as e:
-                logger.error("Lỗi khi gửi ảnh:", str(e))
+                logger.error("Media send failed: %s", str(e))
                 return Response({
                     "status": "error",
-                    "message": f"Không thể gửi ảnh"
+                    "message": SEND_MEDIA_MESSAGES["send_failed"]
                 }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-            # 🧩 Bước 4: Phản hồi kết quả
+            # === Step 4: Build final response ===
             response_data = send_result.get("response", {})
             status_code = send_result.get("status_code", 200)
+
             if isinstance(response_data, dict) and "errNo" in response_data:
                 status_code = 400
 
             return Response({
                 "status": "success" if status_code == 200 else "error",
+                "message": SEND_MEDIA_MESSAGES["success"] if status_code == 200 else SEND_MEDIA_MESSAGES["send_failed"],
                 "sent_to": to_number,
                 "uploaded_image_url": uploaded_image_url,
                 "status_code": status_code,
@@ -1247,11 +1261,10 @@ class SendMediaView(APIView):
             }, status=status_code)
 
         except Exception as e:
-       
-            print("Lỗi không xác định trong quá trình gửi media:", str(e))
+            logger.error("Unknown media send error: %s", str(e))
             return Response({
                 "status": "error",
-                "message": f"Không gửi được tin nhắn có hình ảnh: {str(e)}"
+                "message": SEND_MEDIA_MESSAGES["unknown_error"]
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
 
