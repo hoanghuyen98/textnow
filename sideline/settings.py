@@ -78,18 +78,17 @@ REST_FRAMEWORK = {
         "rest_framework.throttling.ScopedRateThrottle", # giới hạn theo từng API
     ],
     "DEFAULT_THROTTLE_RATES": {
-        "anon": "20/min",        # 60 request/phút cho IP ẩn danh
-        "user": "100/min",       # 600 request/phút cho user đã login
-        'ip_global': '200/min',
+        "anon": "50/min",        # 60 request/phút cho IP ẩn danh
+        "user": "800/min",       # 600 request/phút cho user đã login
+        'ip_global': '800/min',
         "login": "3/second",          # API login
         "token_refresh": "3/second", # refresh token
         "logout": "3/second",        # logout
-        'light': '3/second',       # API nhẹ (GET info, list, v.v.)
-        'medium': '3/second',       # API tương tác (chat, gửi tin)
+        'light': '8/second',       # API nhẹ (GET info, list, v.v.)
+        'medium': '5/second',       # API tương tác (chat, gửi tin)
         'heavy': '3/second',        # API nặng (mua mail, upload)
     },
 }
-
 ROOT_URLCONF = 'sideline.urls'
 
 # ✅ Chỉ định rõ domain frontend
@@ -111,58 +110,58 @@ SIMPLE_JWT = {
 }
 
 
-# # --------- cau hinh luu log ----------------------
-# LOG_DIR = "/var/log/sideline"
-# LOG_FILE = os.path.join(LOG_DIR, "app.log")
+# --------- cau hinh luu log ----------------------
+LOG_DIR = "/var/log/sideline"
+LOG_FILE = os.path.join(LOG_DIR, "app.log")
 
-# os.makedirs(LOG_DIR, exist_ok=True)
+os.makedirs(LOG_DIR, exist_ok=True)
 
-# logfile(LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5)
-# logger.debug(f"Log directory: {LOG_FILE}")
+logfile(LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5)
+logger.debug(f"Log directory: {LOG_FILE}")
 
-# # 🧩 Redirect print() và lỗi ra file luôn
-# sys.stdout = open(LOG_FILE, "a+", buffering=1)  # ghi từng dòng
-# sys.stderr = open(LOG_FILE, "a+", buffering=1)
+# 🧩 Redirect print() và lỗi ra file luôn
+sys.stdout = open(LOG_FILE, "a+", buffering=1)  # ghi từng dòng
+sys.stderr = open(LOG_FILE, "a+", buffering=1)
 
-# # Cấu hình logging chuẩn
-# LOGGING = {
-#     "version": 1,
-#     "disable_existing_loggers": False,
-#     "formatters": {
-#         "verbose": {
-#             "format": "[{levelname}] {asctime} {name}:{lineno} - {message}",
-#             "style": "{",
-#         },
-#     },
-#     "handlers": {
-#         "file": {
-#             # ⚡ Dùng RotatingFileHandler để không bị ghi đè log khi restart
-#             "class": "logging.handlers.RotatingFileHandler",
-#             "level": "DEBUG",
-#             "filename": LOG_FILE,
-#             "formatter": "verbose",
-#             "maxBytes": 10 * 1024 * 1024,  # 10MB
-#             "backupCount": 5,
-#             "delay": True,
-#         },
-#         "console": {
-#             "class": "logging.StreamHandler",
-#             "formatter": "verbose",
-#         },
-#     },
-#     "root": {
-#         "handlers": ["file", "console"],
-#         "level": "DEBUG",
-#     },
-#     "loggers": {
-#         "django.request": {
-#             "handlers": ["file", "console"],
-#             "level": "INFO",
-#             "propagate": False,  # tránh log trùng 2 lần
-#         },
-#     },
-# }
-# # -------------------------------------------------------
+# Cấu hình logging chuẩn
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "verbose": {
+            "format": "[{levelname}] {asctime} {name}:{lineno} - {message}",
+            "style": "{",
+        },
+    },
+    "handlers": {
+        "file": {
+            # ⚡ Dùng RotatingFileHandler để không bị ghi đè log khi restart
+            "class": "logging.handlers.RotatingFileHandler",
+            "level": "DEBUG",
+            "filename": LOG_FILE,
+            "formatter": "verbose",
+            "maxBytes": 10 * 1024 * 1024,  # 10MB
+            "backupCount": 5,
+            "delay": True,
+        },
+        "console": {
+            "class": "logging.StreamHandler",
+            "formatter": "verbose",
+        },
+    },
+    "root": {
+        "handlers": ["file", "console"],
+        "level": "DEBUG",
+    },
+    "loggers": {
+        "django.request": {
+            "handlers": ["file", "console"],
+            "level": "INFO",
+            "propagate": False,  # tránh log trùng 2 lần
+        },
+    },
+}
+# -------------------------------------------------------
 
 # ✅ Cho phép gửi cookie / header Authorization
 CORS_ALLOW_CREDENTIALS = True

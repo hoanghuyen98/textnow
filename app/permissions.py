@@ -1,10 +1,10 @@
 # permissions.py
 from rest_framework import permissions
+from logzero import logger
 
 def get_user_role(user):
     """Trả về role hiện tại của user."""
     if hasattr(user, "employee_profile"):
-        print("----------------")
         return user.employee_profile.role
     elif hasattr(user, "customer_profile"):
         return "customer"
@@ -24,7 +24,7 @@ class RoleRequiredPermission(permissions.BasePermission):
             return False
 
         user_role = get_user_role(request.user)
-        print('user_role: ', user_role)
+        logger.info(f'user_role: {user_role}')
         allowed_roles = getattr(view, "allowed_roles", [])
 
         # Nếu không giới hạn role nào → cho phép luôn

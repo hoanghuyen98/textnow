@@ -1,50 +1,56 @@
 from django.contrib import admin
-from .models import PhoneAccount, Employee, Customer, MailProvider, MailTransaction, PurchasedMail, EmployeeGroup, TextNowAccount, AppleMailProxy, CustomerAssignHistory
-
-
+from django.contrib.admin import DateFieldListFilter
+from .models import (
+    PhoneAccount, Employee, Customer, MailProvider, MailTransaction,
+    PurchasedMail, EmployeeGroup, TextNowAccount, AppleMailProxy,
+    CustomerAssignHistory
+)
 
 @admin.register(PhoneAccount)
 class PhoneAccountAdmin(admin.ModelAdmin):
 
-    # Các cột hiển thị trong danh sách
     list_display = (
+        "id",
         "phone",
         "name",
         "creator_name",
         "customer_name",
+        "mail",
+        "provider",
         "status",
         "is_used",
-        "provider",
-        "created_at",     # 🔥 sẽ hiển thị
-        "updated_at",     # 🔥 thêm để hiển thị
+        "purchased_mail",
+        "created_at",
+        "updated_at",
     )
 
-    # Không cho sửa 2 field này trong trang edit
-    readonly_fields = ("created_at", "updated_at")   # 🔥 bắt buộc phải có
+    readonly_fields = ("created_at", "updated_at")
 
-    # Bộ lọc bên phải
-    list_filter = ("status", "is_used", "creator", "customer")
+    list_filter = (
+        "status",
+        "is_used",
+        "creator",
+        "provider",
+        ("created_at", DateFieldListFilter),
+        ("updated_at", DateFieldListFilter),
+    )
 
-    # Tìm kiếm
     search_fields = (
         "phone",
         "name",
         "mail",
         "creator__user__username",
-        "customer__user__username"
+        "customer__user__username",
     )
 
-    # Sắp xếp mặc định
     ordering = ("-created_at",)
 
-    # Hiển thị tên creator
     def creator_name(self, obj):
-        return obj.creator.user.username if obj.creator and obj.creator.user else "-"
+        return obj.creator.user.username if obj.creator else "-"
     creator_name.short_description = "Nhân viên tạo"
 
-    # Hiển thị tên customer
     def customer_name(self, obj):
-        return obj.customer.user.username if obj.customer and obj.customer.user else "-"
+        return obj.customer.user.username if obj.customer else "-"
     customer_name.short_description = "Khách hàng dùng"
 
 
@@ -52,13 +58,6 @@ class PhoneAccountAdmin(admin.ModelAdmin):
 class CustomerAdmin(admin.ModelAdmin):
     list_display = (
         "id",
-        "user",
-        "phone_assigned_count",
-        "created_at",
-        "updated_at",
-    )
-
-    fields = (
         "user",
         "raw_password",
         "phone_assigned_count",
@@ -68,12 +67,205 @@ class CustomerAdmin(admin.ModelAdmin):
 
     readonly_fields = ("created_at", "updated_at")
 
-admin.site.register(Employee)
+    list_filter = (
+        ("created_at", DateFieldListFilter),
+        ("updated_at", DateFieldListFilter),
+    )
 
-admin.site.register(MailProvider)
-admin.site.register(MailTransaction)
-admin.site.register(PurchasedMail)
-admin.site.register(EmployeeGroup)
-admin.site.register(TextNowAccount)
-admin.site.register(AppleMailProxy)
-admin.site.register(CustomerAssignHistory)
+    search_fields = ("user__username",)
+
+    ordering = ("-created_at",)
+
+
+@admin.register(Employee)
+class EmployeeAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "user",
+        "role",
+        "group",
+        "raw_password",
+        "created_at",
+        "updated_at",
+    )
+
+    readonly_fields = ("created_at", "updated_at")
+
+    list_filter = (
+        "role",
+        "group",
+        ("created_at", DateFieldListFilter),
+        ("updated_at", DateFieldListFilter),
+    )
+
+    search_fields = ("user__username", "role")
+
+    ordering = ("-created_at",)
+
+
+@admin.register(MailProvider)
+class MailProviderAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "name",
+        "base_url",
+        "api_key",
+        "created_at",
+        "updated_at",
+    )
+
+    readonly_fields = ("created_at", "updated_at")
+
+    list_filter = (
+        ("created_at", DateFieldListFilter),
+        ("updated_at", DateFieldListFilter),
+    )
+
+    search_fields = ("name", "base_url")
+
+    ordering = ("-created_at",)
+
+
+@admin.register(MailTransaction)
+class MailTransactionAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "provider",
+        "employee",
+        "product_id",
+        "product_name",
+        "quantity",
+        "total_price",
+        "trans_id",
+        "status",
+        "created_at",
+    )
+
+    readonly_fields = ("created_at",)
+
+    list_filter = (
+        "provider",
+        "employee",
+        "status",
+        ("created_at", DateFieldListFilter),
+    )
+
+    search_fields = ("product_name", "trans_id")
+
+    ordering = ("-created_at",)
+
+
+@admin.register(PurchasedMail)
+class PurchasedMailAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "purchase",
+        "email",
+        "password",
+        "provider",
+        "is_used",
+        "is_delete",
+        "created_at",
+    )
+
+    readonly_fields = ("created_at",)
+
+    list_filter = (
+        "provider",
+        "is_used",
+        "is_delete",
+        ("created_at", DateFieldListFilter),
+    )
+
+    search_fields = ("email", "provider")
+
+    ordering = ("-created_at",)
+
+
+@admin.register(EmployeeGroup)
+class EmployeeGroupAdmin(admin.ModelAdmin):
+    list_display = ("id", "name", "created_at", "updated_at")
+
+    readonly_fields = ("created_at", "updated_at")
+
+    list_filter = (
+        ("created_at", DateFieldListFilter),
+        ("updated_at", DateFieldListFilter),
+    )
+
+    search_fields = ("name",)
+
+    ordering = ("-created_at",)
+
+
+@admin.register(TextNowAccount)
+class TextNowAccountAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "employee",
+        "email",
+        "password",
+        "is_active",
+        "created_at",
+        "updated_at",
+    )
+
+    readonly_fields = ("created_at", "updated_at")
+
+    list_filter = (
+        "employee",
+        "is_active",
+        ("created_at", DateFieldListFilter),
+        ("updated_at", DateFieldListFilter),
+    )
+
+    search_fields = ("email",)
+
+    ordering = ("-created_at",)
+
+
+@admin.register(AppleMailProxy)
+class AppleMailProxyAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "employee",
+        "mail",
+        "proxy_ip",
+        "note",
+        "created_at",
+        "updated_at",
+    )
+
+    readonly_fields = ("created_at", "updated_at")
+
+    list_filter = (
+        "employee",
+        ("created_at", DateFieldListFilter),
+        ("updated_at", DateFieldListFilter),
+    )
+
+    search_fields = ("mail", "proxy_ip")
+
+    ordering = ("-created_at",)
+
+
+@admin.register(CustomerAssignHistory)
+class CustomerAssignHistoryAdmin(admin.ModelAdmin):
+    list_display = (
+        "id",
+        "phone_count",
+        "creator",
+        "created_at",
+    )
+
+    readonly_fields = ("created_at",)
+
+    list_filter = (
+        "creator",
+        ("created_at", DateFieldListFilter),
+    )
+
+    search_fields = ("creator__username",)
+
+    ordering = ("-created_at",)
+

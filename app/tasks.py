@@ -18,7 +18,7 @@ def check_phone_all_batches():
     - Cập nhật DB + trả log chi tiết
     """
     now = timezone.now()
-    live_expired_time = now - timedelta(hours=24)
+    live_expired_time = now - timedelta(hours=72)
 
     total = 0
     success = 0
@@ -27,10 +27,10 @@ def check_phone_all_batches():
     logs = []
     # ✅ chỉ lấy các số live, chưa bị die/lock, và chưa được sử dụng
     phone_qs = PhoneAccount.objects.exclude(
-        status__in=["die", "die_use", "lock"]
+        status__in=["die_use", "lock"]
     ).filter(is_used=False)
 
-    print(f"🔍 Bắt đầu kiểm tra {phone_qs.count()} tài khoản khả dụng (chưa dùng)...")
+    logger.info(f"🔍 Bắt đầu kiểm tra {phone_qs.count()} tài khoản khả dụng (chưa dùng)...")
 
     for phone in phone_qs:
         total += 1
@@ -48,7 +48,7 @@ def check_phone_all_batches():
                 "message": msg,
                 "checked_at": now.strftime("%Y-%m-%d %H:%M:%S"),
             })
-            print(f"[{phone.phone}] {msg}")
+            logger.info(f"[{phone.phone}] {msg}")
             continue
 
         result = run_curl(curl_text)
@@ -59,19 +59,19 @@ def check_phone_all_batches():
             phone.status = "die_use"
             failed += 1
             msg = f"Lỗi: {result['error']}"
-            print(f"[{phone.phone}] ❌ {msg}")
+            logger.info(f"[{phone.phone}] ❌ {msg}")
 
         elif isinstance(result.get("status"), int) and result["status"] >= 400:
             phone.status = "die_use"
             failed += 1
             msg = f"Lỗi HTTP {result['status']}"
-            print(f"[{phone.phone}] ⚠️ {msg}")
+            logger.info(f"[{phone.phone}] ⚠️ {msg}")
 
         else:
             phone.status = "live"
             success += 1
             msg = "Kết nối OK (reset 24h)"
-            print(f"[{phone.phone}] ✅ {msg}")
+            logger.info(f"[{phone.phone}] ✅ {msg}")
 
         phone.updated_at = now
 
@@ -84,7 +84,7 @@ def check_phone_all_batches():
                 "status": "lock",
                 "message": "🔒 Locked (đã sống quá 24h kể từ khi tạo)"
             })
-            print(f"[{phone.phone}] 🔒 Locked (đã sống quá 24h kể từ khi tạo)")
+            logger.info(f"[{phone.phone}] 🔒 Locked (đã sống quá 24h kể từ khi tạo)")
             phone.save()
             continue
             
@@ -105,11 +105,11 @@ def check_phone_all_batches():
         "logs": logs,
     }
 
-    print(f"✅ Done checking {total} accounts: {success} live, {failed} failed, {locked} locked.")
+    logger.info(f"✅ Done checking {total} accounts: {success} live, {failed} failed, {locked} locked.")
     return summary
 
 @shared_task
 def check_all_batches():
-    print("🔥 Task check_all_batches đang chạy...")
+    logger.info("🔥 Task check_all_batches đang chạy...")
     # ví dụ logic thật của bạn
     return {"result": "OK"}

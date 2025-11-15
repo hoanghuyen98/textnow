@@ -1,7 +1,7 @@
 import re
 import hashlib
 from rest_framework import serializers
-from .models import CustomerAssignHistory, PhoneAccount, Customer, PurchasedMail, EmployeeGroup, Employee
+from .models import CustomerAssignHistory, PhoneAccount, Customer, PurchasedMail, EmployeeGroup, Employee, CustomerAssignHistory
 from django.contrib.auth.models import User
 from django.core.validators import RegexValidator
 from django.db.models import Q
@@ -84,8 +84,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     # ✅ CREATE
     # ----------------------------
     def create(self, validated_data):
-        print('---------------------')
-        print('validated_data: ', validated_data)
+        logger.info(f'validated_data: {validated_data}')
         user_data = validated_data.pop("user", {})
         username = user_data.get("username")
         password = user_data.get("password")
@@ -122,7 +121,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
     # ✅ UPDATE
     # ----------------------------
     def update(self, instance, validated_data):
-        print('validated_data:', validated_data)
+        logger.info(f'validated_data: {validated_data}')
 
         # --- Lấy thông tin user ---
         user_data = validated_data.pop("user", {})
@@ -151,6 +150,7 @@ class EmployeeSerializer(serializers.ModelSerializer):
 
         instance.save()
         return instance
+
 
 class PhoneAccountSerializer(serializers.ModelSerializer):
     creator = serializers.StringRelatedField(read_only=True)
@@ -213,14 +213,9 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
         Kiểm tra field OAuth trùng trong DB.
         Trả về list các key bị trùng (nếu có)
         """
-        print("field_name: ", field_name)
         if field_values:
-            # dùng icontains để tránh lỗi None
-            print(PhoneAccount.objects.filter(**{f"{field_name}": field_values}).first())
             if PhoneAccount.objects.filter(**{f"{field_name}": field_values}).exists():
-                print("flkdsjflkdsj")
                 return True
-            print("chua ton tai")
         return False
 
 
@@ -273,12 +268,28 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
 
         return data
 
+
 class PhoneOfCustomerSimpleSerializer(serializers.ModelSerializer):
     """Serializer rút gọn của group: chỉ lấy id và name"""
     status_display  = serializers.CharField(source="get_status_display", read_only=True)
     class Meta:
         model = PhoneAccount
         fields = ["id", "name", "phone", "status", "status_display", "created_at"]
+
+
+class CustomerAssignHistorySerializer(serializers.ModelSerializer):
+    creator_username = serializers.CharField(source="creator.username", read_only=True)
+
+    class Meta:
+        model = CustomerAssignHistory
+        fields = [
+            "id",
+            "phone_count",
+            "created_list",
+            "created_at",
+            "creator",
+            "creator_username",
+        ]
 
 
 class CustomerAutoCreateSerializer(serializers.Serializer):
@@ -300,17 +311,19 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
         request_user = self.context["request"].user
         
         phone_count = validated_data["phone_count"]
-        s_time = time.time()
+        logger.info(f"phone_count: {phone_count}")
+
         # LẤY PHONE CÓ CUSTOMER + CÒN LIVE + CHƯA DÙNG
         available_phones = list(
             PhoneAccount.objects.filter(
                 status="live",
                 is_used=False,
-                customer__isnull=False
+                customer__isnull=True
             )
             .select_related("customer", "customer__user")
             .order_by("created_at")[: phone_count]
         )
+        logger.info(f"available_phones: {available_phones}")
 
         if len(available_phones) < phone_count:
             return {
@@ -324,7 +337,6 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
         
         for phone in available_phones:
 
-            # ĐÁNH DẤU SỐ ĐÃ CẤP + CẬP NHẬT updated_at
             phone.is_used = True
             phone.updated_at = now
             phone.save(update_fields=["is_used", "updated_at"])
@@ -334,11 +346,7 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
                 "username": phone.customer.user.username,
                 "password": phone.customer.raw_password,
             })
-        logger.debug(time.time() -s_time)
 
-        # ============================
-        # 🔥 LƯU LỊCH SỬ CẤP SỐ
-        # ============================
         CustomerAssignHistory.objects.create(
             phone_count=phone_count,
             created_list=created_list,
@@ -370,13 +378,12 @@ class CustomerSerializer(serializers.ModelSerializer):
         return PhoneOfCustomerSimpleSerializer(phones, many=True).data
 
     def create(self, validated_data):
-        print('-------')
-        print('validated_data:sss ', validated_data)
+        logger.info(f'validated_data: {validated_data}')
         user_data = validated_data.pop("user", {})
         username = user_data.get("username")
         password = user_data.get("password")
         phone_count = validated_data.pop("phone_assigned_count")
-        print('phone_count: ', phone_count)
+        logger.info(f'phone_count: {phone_count}')
 
         if User.objects.filter(username=username).exists():
                     raise serializers.ValidationError(
@@ -391,12 +398,10 @@ class CustomerSerializer(serializers.ModelSerializer):
 
         # Gán số điện thoại nếu có
         if phone_count > 0:
-            print('phone_count: ', phone_count)
             available_phones = (
                 PhoneAccount.objects.filter(status="live", is_used=False)
                 .order_by("created_at")[:phone_count]
             )
-            print('available_phones: ', available_phones)
             if available_phones.count() < phone_count:
                 raise serializers.ValidationError(
                     {"phone_count": "Không đủ số điện thoại khả dụng (live & chưa dùng)."}
@@ -411,13 +416,11 @@ class CustomerSerializer(serializers.ModelSerializer):
         return customer
 
     def update(self, instance, validated_data):
-        print('-------')
-        print('validated_data:sss ', validated_data)
+        logger.info(f'validated_data: {validated_data}')
         user_data = validated_data.pop("user", {})
         username = user_data.get("username")
         password = user_data.get("password")
         phone_count = validated_data.pop("phone_assigned_count", 0)
-        print("-------------------------: ", phone_count)
         user = instance.user
 
         if password:
@@ -425,7 +428,6 @@ class CustomerSerializer(serializers.ModelSerializer):
             instance.password = password
             instance.raw_password = password
         user.save()
-        print('----------------')
         instance.save()
 
         if phone_count > 0:
@@ -433,18 +435,15 @@ class CustomerSerializer(serializers.ModelSerializer):
                 PhoneAccount.objects.filter(status="live", is_used=False)
                 .order_by("created_at")[:phone_count]
             )
-            print('available_phones: ', available_phones)
             if available_phones.count() < phone_count:
                 raise serializers.ValidationError(
                     {"phone_count": "Không đủ số điện thoại khả dụng (live & chưa dùng)."}
                 )
             for phone in available_phones:
-                print("???")
                 phone.customer = instance
                 phone.is_used = True
                 phone.save()
             instance.phone_assigned_count += phone_count
-            print("djkshadjksah")
             instance.save()
         return instance
 

@@ -76,9 +76,6 @@ class Customer(models.Model):
     raw_password = models.TextField(blank=True, null=True)
     phone_assigned_count = models.PositiveIntegerField(default=0)
 
-    is_provided = models.BooleanField(default=False)
-    provided_at = models.DateTimeField(null=True, blank=True) 
-
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 

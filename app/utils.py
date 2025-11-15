@@ -8,6 +8,7 @@ try:
     HAS_CONVERTER = True
 except Exception:
     HAS_CONVERTER = False
+import time
 
 
 def to_utc_isoformat(t):
@@ -144,6 +145,7 @@ def extract_auth_code(html_content: str) -> str | None:
 
     return None
 
+
 def run_curl(curl_text):
     c = strip_proxy(curl_text)
     p = parse_curl(c)
@@ -166,7 +168,49 @@ def run_curl(curl_text):
         body = resp.json()
     except Exception:
         body = resp.text
+        logger.info(f"run_curl_body: {body}")
     return {"status": resp.status_code, "headers": dict(resp.headers), "body": body}
+
+
+def run_curl_with_retry(batch_cmd: str, retries: int = 3, delay: float = 1.0):
+    """
+    Gọi run_curl(batch_cmd) tối đa 3 lần.
+    Nếu bất kỳ lần nào trả về status < 400 → coi như live.
+    Nếu lỗi hoặc status >= 400 → thử lại tối đa 3 lần.
+    """
+    for attempt in range(1, retries + 1):
+        try:
+            result = run_curl(batch_cmd)
+
+            # Nếu result rỗng → retry
+            if not result:
+                logger.warning(f"[Retry {attempt}] Empty result")
+                time.sleep(delay)
+                continue
+
+            # Nếu có field error → retry
+            if "error" in result:
+                logger.warning(f"[Retry {attempt}] Error: {result.get('error')}")
+                time.sleep(delay)
+                continue
+
+            # Nếu status >= 400 → retry
+            if result.get("status", 500) >= 400:
+                logger.warning(f"[Retry {attempt}] Status >=400: {result.get('status')}")
+                time.sleep(delay)
+                continue
+
+            # ➜ Thành công
+            logger.info(f"[Retry {attempt}] CURL thành công → LIVE")
+            return True
+
+        except Exception as e:
+            logger.error(f"[Retry {attempt}] Exception: {e}")
+            time.sleep(delay)
+
+    # ➜ Sau 3 lần vẫn thất bại
+    logger.error("[Retry] Tất cả retry đều thất bại → DIE")
+    return False
 
 
 def send_pinger_message(
@@ -204,7 +248,7 @@ def send_pinger_message(
         "name": name,
         "TN": to_number
     }]
-
+    logger.info(f'send_pinger_message_body: {body}')
     if media_url:
         body["media"] = {"image": media_url}
     if link_url:
@@ -213,20 +257,19 @@ def send_pinger_message(
     # --- Gửi request thực
     try:
         resp = requests.post(msg_url, headers=headers, json=body, timeout=30)
-        print('resp: ', resp)
+        logger.info(f'resp: {resp}')
     except requests.RequestException as e:
         return {"status": "error", "message": f"network_error {str(e)}"}
 
     # --- Xử lý kết quả trả về
     try:
         result = resp.json()
-        print('result: ', result)
+        logger.info(f'result: {result}')
     except Exception:
         result = resp.text
 
     # --- Nếu có errNo thì fail ---
     if isinstance(result, dict) and "errNo" in result:
-        print("????????")
         return {
             "status": "error",
             "status_code": resp.status_code,
@@ -237,7 +280,6 @@ def send_pinger_message(
 
     # --- Nếu HTTP lỗi ---
     if resp.status_code >= 400:
-        print("tttttt")
         return {
             "status": "error",
             "status_code": resp.status_code,

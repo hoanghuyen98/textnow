@@ -11,7 +11,6 @@ load_dotenv()
 
 SELLMMO_KEY = os.environ.get('SELLMMO_KEY')
 DONGVAN_KEY = os.environ.get('DONGVAN_KEY')
-print("SELLMMO_KEY from .env:", os.getenv("SELLMMO_KEY"))
 API_CONFIG = {
     "sellmmo": {
         "base_url": "https://www.sellmmo.net/api",
@@ -116,7 +115,7 @@ def buy_mail_sellmmo(employee, product_id: str, amount: int = 1, coupon: str = "
         "api_key": conf["key"]
     }
 
-    print(f"[SellMMO] payload:", payload)
+    logger.info(f"[SellMMO] payload: {payload}")
 
     try:
         resp = requests.post(url, data=payload, timeout=15)
@@ -194,7 +193,7 @@ def buy_mail_dongvan(employee, account_type: int, quality: int = 0, type: str = 
     try:
         resp = requests.get(url, params=params, timeout=15)
         data = resp.json()
-        print("[DongVan] response:", data)
+        logger.info(f"[DongVan] response: {data}")
     except Exception as e:
         logger.error(f"Lỗi khi gọi API DongVan: {e}")
         return {"status": "error", "message": f"Lỗi hệ thống mua mail"}
