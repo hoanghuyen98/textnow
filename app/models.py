@@ -5,6 +5,8 @@ from django.contrib.auth.models import User
 
 class EmployeeGroup(models.Model):
     name = models.CharField(max_length=100)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 
     def __str__(self):
         return self.name
@@ -30,6 +32,9 @@ class Employee(models.Model):
     )
 
     raw_password = models.TextField(blank=True, null=True)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
+
     def __str__(self):
         return f"{self.user.username} ({self.role})"
 
@@ -39,6 +44,29 @@ class Employee(models.Model):
             self.user.delete()
         super().delete(*args, **kwargs)
 
+
+class CustomerAssignHistory(models.Model):
+    phone_count = models.PositiveIntegerField()
+    created_list = models.JSONField()   # Lưu list JSON
+    created_at = models.DateTimeField(auto_now_add=True)
+
+    # Ai thực hiện cấp (admin/staff)
+    creator = models.ForeignKey(
+        User,
+        on_delete=models.SET_NULL,
+        null=True,
+        blank=True,
+        related_name="assign_histories"
+    )
+
+    class Meta:
+        db_table = "customer_assign_history"
+        ordering = ["-created_at"]
+
+    def __str__(self):
+        return f"Lần cấp {self.phone_count} số - {self.created_at}"
+
+
 class Customer(models.Model):
     user = models.OneToOneField(
         User,
@@ -47,6 +75,12 @@ class Customer(models.Model):
     )
     raw_password = models.TextField(blank=True, null=True)
     phone_assigned_count = models.PositiveIntegerField(default=0)
+
+    is_provided = models.BooleanField(default=False)
+    provided_at = models.DateTimeField(null=True, blank=True) 
+
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 
     def __str__(self):
         return f"{self.user.username}"
@@ -129,6 +163,9 @@ class MailProvider(models.Model):
     name = models.CharField(max_length=100, unique=True,  null=True, blank=True)
     base_url = models.URLField()
     api_key = models.CharField(max_length=255)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
+
     def __str__(self): return self.name
 
 
@@ -157,7 +194,7 @@ class PurchasedMail(models.Model):
     client_id = models.CharField(max_length=100, blank=True, null=True)
     provider = models.CharField(max_length=50, blank=True, null=True)
     is_used = models.BooleanField(default=False)
-
+    is_delete = models.BooleanField(default=False)
     created_at = models.DateTimeField(auto_now_add=True)
 
     class Meta:

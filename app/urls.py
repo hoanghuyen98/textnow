@@ -51,7 +51,9 @@ urlpatterns = [
     path("save_textnow/", views.SaveTextNowAccountView.as_view(), name="save_textnow"),
 
     # thống kê
-    path("phone_summary/", views.PhoneReportView.as_view(), name="employee_phone_summary"),
+    path("report_by_employee", views.PhoneReportByEmployeeView.as_view()),
+    path("report_by_group", views.PhoneReportByGroupView.as_view()),
+    path("report_by_group_sold", views.PhoneReportByGroupSoldView.as_view()),
     path("reports_overview/", views.PhoneOverviewView.as_view(), name="phone_overview"),
 
 ] + router.urls

@@ -1,14 +1,17 @@
 import re
 import hashlib
 from rest_framework import serializers
-from .models import PhoneAccount, Customer, PurchasedMail, EmployeeGroup, Employee
+from .models import CustomerAssignHistory, PhoneAccount, Customer, PurchasedMail, EmployeeGroup, Employee
 from django.contrib.auth.models import User
 from django.core.validators import RegexValidator
 from django.db.models import Q
 from django.db import transaction
 from .models import PhoneAccount, AppleMailProxy  # tránh circular import
 from logzero import logger
+from django.utils import timezone
 import random, string
+from django.contrib.auth.hashers import make_password
+import time
 
 class AppleMailProxySerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source="employee.user.username", read_only=True)
@@ -294,74 +297,61 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
         return phone  # fallback nếu không đủ 10 số
 
     def create(self, validated_data):
+        request_user = self.context["request"].user
+        
         phone_count = validated_data["phone_count"]
-        logger.info(phone_count)
-        logger.info("check")
-        all_obj = PhoneAccount.objects.all()
-
-        available_phones = (
-            PhoneAccount.objects.filter(status="live", is_used=False)
-            .order_by("created_at")[:phone_count]
+        s_time = time.time()
+        # LẤY PHONE CÓ CUSTOMER + CÒN LIVE + CHƯA DÙNG
+        available_phones = list(
+            PhoneAccount.objects.filter(
+                status="live",
+                is_used=False,
+                customer__isnull=False
+            )
+            .select_related("customer", "customer__user")
+            .order_by("created_at")[: phone_count]
         )
 
-        if available_phones.count() == 0:
+        if len(available_phones) < phone_count:
             return {
                 "status": "error",
-                "message": "Không có số điện thoại khả dụng (live & chưa dùng).",
+                "message": f"Không đủ số, cần {phone_count}, chỉ có {len(available_phones)}.",
                 "data": None
             }
 
-        created_accounts = []
-        created_count = 0
+        created_list = []
+        now = timezone.now()
+        
+        for phone in available_phones:
 
-        with transaction.atomic():
-            for phone in available_phones:
-                if created_count >= phone_count:
-                    break
+            # ĐÁNH DẤU SỐ ĐÃ CẤP + CẬP NHẬT updated_at
+            phone.is_used = True
+            phone.updated_at = now
+            phone.save(update_fields=["is_used", "updated_at"])
 
-                formatted_phone = self.format_phone(phone.phone)
-                username = formatted_phone
+            created_list.append({
+                "phone": phone.phone,
+                "username": phone.customer.user.username,
+                "password": phone.customer.raw_password,
+            })
+        logger.debug(time.time() -s_time)
 
-                # Nếu user đã tồn tại thì bỏ qua
-                if User.objects.filter(username=username).exists():
-                    continue
+        # ============================
+        # 🔥 LƯU LỊCH SỬ CẤP SỐ
+        # ============================
+        CustomerAssignHistory.objects.create(
+            phone_count=phone_count,
+            created_list=created_list,
+            creator=request_user
+        )
 
-                password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
-
-                # 🔹 Tạo user
-                user = User.objects.create_user(username=username, password=password)
-
-                # 🔹 Tạo customer
-                customer = Customer.objects.create(
-                    user=user,
-                    raw_password=password,
-                    phone_assigned_count=1
-                )
-
-                # 🔹 Gán số điện thoại
-                phone.customer = customer
-                phone.is_used = True
-                phone.save()
-
-                created_accounts.append({
-                    "username": username,
-                    "password": password,
-                })
-                created_count += 1
-
-            if created_count < phone_count:
-                return {
-                    "status": "warning",
-                    "message": f"Chỉ tạo được {created_count}/{phone_count} tài khoản (do trùng username hoặc thiếu số khả dụng).",
-                    "data": created_accounts
-                }
 
         return {
             "status": "success",
-            "message": f"Tạo thành công {created_count} tài khoản khách hàng.",
-            "data": created_accounts
+            "message": f"Đã cấp thành công {phone_count} số cho khách.",
+            "data": created_list
         }
-
+    
 
 class CustomerSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", required=False)
@@ -371,7 +361,7 @@ class CustomerSerializer(serializers.ModelSerializer):
     raw_password = serializers.CharField(read_only=True, required=False)
     class Meta:
         model = Customer
-        fields = ["id", "username", "password", "raw_password", "phone_assigned_count", "phones"]
+        fields = ["id", "username", "password", "raw_password", "phone_assigned_count", "phones", "created_at"]
 
 
     def get_phones(self, obj):
