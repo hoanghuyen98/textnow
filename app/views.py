@@ -62,6 +62,7 @@ class CheckStatusView(APIView):
     """
 
     def post(self, request):
+        print('---------------')
         task = check_phone_all_batches.delay()
         return Response({
             "task_id": task.id,
@@ -170,7 +171,6 @@ class StandardResultsSetPagination(PageNumberPagination):
                 "data": data
             }
         })
-
 
 class AppleMailProxyViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -321,7 +321,7 @@ class EmployeeGroupViewSet(viewsets.ModelViewSet):
                 )
             else:
                 message = str(detail)
-            logger.info(f'message: {message}')
+            print('message: ', message)
             return Response({
                 "status": "error",
                 "message": message
@@ -404,25 +404,19 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-
-            return Response({
-                "count": self.paginator.page.paginator.count,
-                "next": self.paginator.get_next_link(),
-                "previous": self.paginator.get_previous_link(),
-                "results": {
-                    "status": "success",
-                    "message": "Lấy danh sách nhân viên thành công.",
-                    "data": serializer.data
-                }
+            return self.get_paginated_response({
+                "status": "success",
+                "message": "Lấy danh sách nhân viên thành công.",
+                "data": serializer.data
             })
 
-        # không phân trang
+    
         serializer = self.get_serializer(queryset, many=True)
         return Response({
             "status": "success",
             "message": "Lấy danh sách nhân viên thành công.",
             "data": serializer.data
-        })
+        }, status=status.HTTP_200_OK)
 
     def create(self, request, *args, **kwargs):
         try:
@@ -450,7 +444,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 )
             else:
                 message = str(detail)
-            logger.info(f'message: {message}')
+            print('message: ', message)
             return Response({
                 "status": "error",
                 "message": message
@@ -575,35 +569,6 @@ class AutoCreateCustomerView(APIView):
             "message": "Dữ liệu không hợp lệ.",
             "errors": serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
-
-
-class CustomerAssignHistoryLatestView(APIView):
-    permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
-    allowed_roles = ["admin"]
-    throttle_classes = [ScopedRateThrottle]
-    throttle_scope = "light"
-
-    def get(self, request):
-        latest_obj = (
-            CustomerAssignHistory.objects
-            .select_related("creator")
-            .order_by("-created_at")
-            .first()
-        )
-
-        if not latest_obj:
-            return Response({
-                "status": "error",
-                "message": "Không có lịch sử cấp số."
-            }, status=404)
-
-        serializer = CustomerAssignHistorySerializer(latest_obj)
-
-        return Response({
-            "status": "success",
-            "message": "Lấy bản ghi lịch sử mới nhất thành công.",
-            "data": serializer.data
-        })
 
 
 class CustomerViewSet(viewsets.ModelViewSet):
@@ -768,7 +733,7 @@ class CustomerInfoView(APIView):
         stats = {
             "total_phones": phones.count(),
             "live": phones.filter(status="live").count(),
-            "die": phones.filter(status=["die", "die_use", "lock"]).count(),
+            "die": phones.filter(status="die").count(),
         }
 
         return Response({
@@ -802,9 +767,10 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # --- Kiểm tra mail purchased ---
+            # 1. Check if purchased mail belongs to employee
             purchased_mail = PurchasedMail.objects.filter(
-                email=email, purchase__employee=employee
+                email=email,
+                purchase__employee=employee
             ).first()
 
             if not purchased_mail:
@@ -816,6 +782,7 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
+            # 2. Prevent using purchased mail again
             if purchased_mail.is_used:
                 return Response(
                     {
@@ -825,56 +792,65 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # --- Decode base64 field ---
+            # 3. Decode base64 fields
             for field in ["batch", "message", "media"]:
                 if field in data and data[field]:
                     try:
                         decoded = base64.b64decode(data[field]).decode("utf-8")
                         data[field] = strip_proxy(decoded)
-                    except:
+                    except Exception:
                         data[field] = strip_proxy(data[field])
 
-            # --- Validate serializer ---
+            # 4. Validate serializer
             serializer = PhoneAccountSerializer(data=data)
             if not serializer.is_valid():
                 return Response(
-                    {"status": "fail", "detail": serializer.errors},
+                    {
+                        "status": "fail",
+                        "detail": serializer.errors
+                    },
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # --- Save phone_obj ---
+            # 5. Save
             phone_obj = serializer.save(
                 creator=employee,
                 purchased_mail=purchased_mail
             )
 
-            # --- Test curl với retry 3 lần ---
-            is_live = run_curl_with_retry(phone_obj.batch, retries=3)
 
-            if is_live:
-                phone_obj.status = "live"
+            # 6. Test curl
+            try:
+                result = run_curl(phone_obj.batch)
+                if "error" in result or result.get("status", 0) >= 400:
+                    phone_obj.status = "die"
+                else:
+                    phone_obj.status = "live"
+                    # 🔥 TẠO CUSTOMER NGAY KHI TẠO PHONE
+                    username = f"({phone_obj.phone[:3]}) {phone_obj.phone[3:6]}-{phone_obj.phone[6:]}"
+                    password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
 
-                # 🎯 Tạo CUSTOMER ngay
-                username = f"({phone_obj.phone[:3]}) {phone_obj.phone[3:6]}-{phone_obj.phone[6:]}"
-                password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+                    user = User.objects.create_user(username=username, password=password)
 
-                user = User.objects.create_user(username=username, password=password)
+                    customer = Customer.objects.create(
+                        user=user,
+                        raw_password=password,
+                        phone_assigned_count=1,
+                        is_provided=False,
+                        provided_at=None
+                    )
 
-                customer = Customer.objects.create(
-                    user=user,
-                    raw_password=password,
-                    phone_assigned_count=1
-                )
+                    # GÁN CUSTOMER VÀO PHONE
+                    phone_obj.customer = customer
+                    phone_obj.save(update_fields=["customer"])
 
-                phone_obj.customer = customer
-                phone_obj.save(update_fields=["customer"])
-
-            else:
+            except Exception as e:
+                print("Exception while testing curl:", e)
                 phone_obj.status = "die"
 
             phone_obj.save(update_fields=["status"])
 
-            # Mark mail used
+            # 7. Mark mail used
             purchased_mail.is_used = True
             purchased_mail.save(update_fields=["is_used"])
 
@@ -893,7 +869,10 @@ class CreatePhoneAccountView(APIView):
         except Exception as e:
             logger.error(f"Lỗi khi tạo PhoneAccount: {e}")
             return Response(
-                {"status": "error", "message": "Lỗi hệ thống khi tạo PhoneAccount."},
+                {
+                    "status": "error",
+                    "message": "Lỗi hệ thống khi tạo PhoneAccount."
+                },
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -1127,7 +1106,7 @@ class SendMessageView(APIView):
                 curl_text
             )
 
-            logger.info(f"Updated cURL: {updated_curl}", )
+            print("Updated cURL:\n", updated_curl)
 
             # === Send actual message ===
             result = send_pinger_message(
@@ -1241,11 +1220,8 @@ class SendMediaView(APIView):
                 headers.pop(h, None)
 
             # === Step 1: Upload image ===
-            logger.info(f'send_pinger_message_url: {url}')
-            logger.info(f"headers: {headers}")
             try:
                 resp = requests.post(url, headers=headers, data=file.file, timeout=60)
-                logger.info(f"resp: {resp}")
             except Exception as e:
                 logger.error("Image upload failed: %s", str(e))
                 return Response({
@@ -1343,7 +1319,7 @@ class MailCategoriesView(APIView):
 
     def get(self, request):
         provider = request.query_params.get("provider")
-        logger.info(f'provider: {provider}')
+        print('provider: ', provider)
         if not provider:
             return Response(
                 {"status": "error", "message": "Thiếu tham số 'provider'."},
@@ -1406,13 +1382,14 @@ class BuyMailView(APIView):
             )
 
         quality = int(request.data.get("quality", 0))
-        logger.info(f"quality= {quality}")
+        print("-----------")
+        print(quality)
         coupon = request.data.get("coupon", "")
 
         try:
             if provider == "sellmmo":
                 result = buy_mail_sellmmo(employee=user, product_id=product_id, amount=quality, coupon=coupon)
-                logger.info(f'result: {result}')
+                print('result: ', result)
             elif provider == "dongvan":
                 result = buy_mail_dongvan(employee=user, account_type=product_id, quality=quality)
 
@@ -1590,7 +1567,6 @@ class SaveAppleMailView(APIView):
                 "message": "Lỗi hệ thống khi lưu Apple Mail Proxy."
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 class SaveTextNowAccountView(APIView):
     """
     ✅ API: Lưu hoặc cập nhật tài khoản TextNow
@@ -1664,7 +1640,6 @@ class SaveTextNowAccountView(APIView):
                 "message": f"Lỗi hệ thống"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
-
 class EmployeePhoneSummaryView(APIView):
     """
     ✅ API: Thống kê số lượng PhoneAccount mà nhân viên đã tạo (Pinger, TextNow)
@@ -1700,6 +1675,7 @@ class EmployeePhoneSummaryView(APIView):
                 creator=employee,
                 created_at__date=today
             )
+            print('pinger_today_qs: ', pinger_today_qs)
             pinger_today = pinger_today_qs.count()
             pinger_today_live = pinger_today_qs.filter(status="live").count()
             pinger_today_die = pinger_today_qs.filter(
@@ -1894,7 +1870,7 @@ class PhoneReportByEmployeeView(APIView):
                 disabled_import=Count("id", filter=Q(status="die")),
                 disabled_after=Count("id", filter=Q(status__in=["lock", "die_use"])),
             )
-            .order_by("-created_at__date", "creator__user__username")  # 🔥 mới nhất → cũ nhất
+            .order_by("creator__user__username", "created_at__date")
         )
 
         records = []
@@ -2025,14 +2001,14 @@ class PhoneReportByGroupSoldView(APIView):
         )
 
         all_groups = EmployeeGroup.objects.order_by("name")
-        sold_queryset = queryset.filter(is_used=True, customer__isnull=False)
+        sold_queryset = queryset.filter(customer__isnull=False)
 
         by_group_sold = sold_queryset.values("creator__group__name").annotate(
             sdt_da_cap=Count("id")
         )
 
         stats_group_sold = {g["creator__group__name"]: g for g in by_group_sold}
-        total_all_phone = queryset.filter(is_used=True, customer__isnull=False).count() or 1
+        total_all_phone = queryset.filter(is_used=True).count() or 1
 
         records = []
         for grp in all_groups:
@@ -2071,13 +2047,11 @@ class PhoneOverviewView(APIView):
             total_sdt = PhoneAccount.objects.count()
             healthy_sdt = PhoneAccount.objects.filter(status="live").count()
             disabled_sdt = PhoneAccount.objects.filter(~Q(status="live")).count()
-            sold_sdt = PhoneAccount.objects.filter(is_used=True, customer__isnull=False).count()
-            phone_1 = PhoneAccount.objects.filter(
-                is_used=False, status="live", customer__isnull=True
-            )
+            sold_sdt = PhoneAccount.objects.filter(customer__isnull=False).count()
             waiting_sdt = PhoneAccount.objects.filter(
-                is_used=False, status="live", customer__isnull=True
+                is_used=False, status="live"
             ).count()
+
             data = {
                 "tong_sdt": total_sdt,
                 "healthy_sdt": healthy_sdt,

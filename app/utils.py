@@ -2,6 +2,10 @@ import re, shlex, json, requests
 from datetime import datetime, timezone
 from logzero import logger
 from bs4 import BeautifulSoup
+import subprocess
+import os
+
+PROXY_US = os.environ.get('PROXY_US')
 
 try:
     import curlconverter

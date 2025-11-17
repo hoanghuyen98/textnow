@@ -79,14 +79,14 @@ REST_FRAMEWORK = {
     ],
     "DEFAULT_THROTTLE_RATES": {
         "anon": "50/min",        # 60 request/phút cho IP ẩn danh
-        "user": "800/min",       # 600 request/phút cho user đã login
-        'ip_global': '800/min',
-        "login": "3/second",          # API login
-        "token_refresh": "3/second", # refresh token
-        "logout": "3/second",        # logout
-        'light': '8/second',       # API nhẹ (GET info, list, v.v.)
-        'medium': '5/second',       # API tương tác (chat, gửi tin)
-        'heavy': '3/second',        # API nặng (mua mail, upload)
+        "user": "1000/min",       # 600 request/phút cho user đã login
+        'ip_global': '1000/min',
+        "login": "13/second",          # API login
+        "token_refresh": "13/second", # refresh token
+        "logout": "13/second",        # logout
+        'light': '18/second',       # API nhẹ (GET info, list, v.v.)
+        'medium': '15/second',       # API tương tác (chat, gửi tin)
+        'heavy': '15/second',        # API nặng (mua mail, upload)
     },
 }
 ROOT_URLCONF = 'sideline.urls'

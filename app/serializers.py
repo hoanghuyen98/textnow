@@ -318,7 +318,7 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
             PhoneAccount.objects.filter(
                 status="live",
                 is_used=False,
-                customer__isnull=True
+                customer__isnull=False
             )
             .select_related("customer", "customer__user")
             .order_by("created_at")[: phone_count]
