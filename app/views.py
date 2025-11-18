@@ -15,7 +15,7 @@ from rest_framework.decorators import api_view, permission_classes
 import base64
 from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer, MailTransaction, AppleMailProxy, CustomerAssignHistory
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .utils import run_curl, parse_curl, strip_proxy, send_pinger_message, normalize_phone_number, parse_time, to_utc_isoformat, run_curl_with_retry
+from .utils import run_curl, parse_curl, strip_proxy, send_pinger_message, normalize_phone_number, parse_time, to_utc_isoformat, run_curl_with_retry, upload_pinger_media
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import AccessToken
@@ -32,14 +32,18 @@ from functools import wraps
 from drf_yasg.utils import swagger_auto_schema
 from django.db import transaction
 from datetime import datetime, date
-from .tasks import check_phone_all_batches
+from .tasks import check_phone_all_batches, bulk_reset_password_task, check_celery
 from rest_framework.throttling import ScopedRateThrottle
 from drf_yasg import openapi
 from .response_messages import PHONE_MESSAGES, INBOX_MESSAGES, SEND_MESSAGE_MESSAGES, SEND_MEDIA_MESSAGES
-
+import subprocess
 from collections import OrderedDict
 from logzero import logger
 from .exceptions import BadRequest, Unauthorized, NotFound
+import secrets
+from concurrent.futures import ThreadPoolExecutor
+from celery.result import AsyncResult
+
 # from rest_framework_simplejwt.authentication import JWTAuthentication
 
 logger = logging.getLogger(__name__)
@@ -62,8 +66,7 @@ class CheckStatusView(APIView):
     """
 
     def post(self, request):
-        print('---------------')
-        task = check_phone_all_batches.delay()
+        task = check_celery.delay()
         return Response({
             "task_id": task.id,
             "status": "queued"
@@ -171,6 +174,7 @@ class StandardResultsSetPagination(PageNumberPagination):
                 "data": data
             }
         })
+
 
 class AppleMailProxyViewSet(viewsets.ReadOnlyModelViewSet):
     """
@@ -321,7 +325,7 @@ class EmployeeGroupViewSet(viewsets.ModelViewSet):
                 )
             else:
                 message = str(detail)
-            print('message: ', message)
+            logger.info(f'message: {message}')
             return Response({
                 "status": "error",
                 "message": message
@@ -404,19 +408,25 @@ class EmployeeViewSet(viewsets.ModelViewSet):
         page = self.paginate_queryset(queryset)
         if page is not None:
             serializer = self.get_serializer(page, many=True)
-            return self.get_paginated_response({
-                "status": "success",
-                "message": "Lấy danh sách nhân viên thành công.",
-                "data": serializer.data
+
+            return Response({
+                "count": self.paginator.page.paginator.count,
+                "next": self.paginator.get_next_link(),
+                "previous": self.paginator.get_previous_link(),
+                "results": {
+                    "status": "success",
+                    "message": "Lấy danh sách nhân viên thành công.",
+                    "data": serializer.data
+                }
             })
 
-    
+        # không phân trang
         serializer = self.get_serializer(queryset, many=True)
         return Response({
             "status": "success",
             "message": "Lấy danh sách nhân viên thành công.",
             "data": serializer.data
-        }, status=status.HTTP_200_OK)
+        })
 
     def create(self, request, *args, **kwargs):
         try:
@@ -444,7 +454,7 @@ class EmployeeViewSet(viewsets.ModelViewSet):
                 )
             else:
                 message = str(detail)
-            print('message: ', message)
+            logger.info(f'message: {message}')
             return Response({
                 "status": "error",
                 "message": message
@@ -569,6 +579,35 @@ class AutoCreateCustomerView(APIView):
             "message": "Dữ liệu không hợp lệ.",
             "errors": serializer.errors
         }, status=status.HTTP_400_BAD_REQUEST)
+
+
+class CustomerAssignHistoryLatestView(APIView):
+    permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
+    allowed_roles = ["admin"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = "light"
+
+    def get(self, request):
+        latest_obj = (
+            CustomerAssignHistory.objects
+            .select_related("creator")
+            .order_by("-created_at")
+            .first()
+        )
+
+        if not latest_obj:
+            return Response({
+                "status": "error",
+                "message": "Không có lịch sử cấp số."
+            }, status=404)
+
+        serializer = CustomerAssignHistorySerializer(latest_obj)
+
+        return Response({
+            "status": "success",
+            "message": "Lấy bản ghi lịch sử mới nhất thành công.",
+            "data": serializer.data
+        })
 
 
 class CustomerViewSet(viewsets.ModelViewSet):
@@ -733,7 +772,7 @@ class CustomerInfoView(APIView):
         stats = {
             "total_phones": phones.count(),
             "live": phones.filter(status="live").count(),
-            "die": phones.filter(status="die").count(),
+            "die": phones.filter(status=["die", "die_use", "lock"]).count(),
         }
 
         return Response({
@@ -767,10 +806,9 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 1. Check if purchased mail belongs to employee
+            # --- Kiểm tra mail purchased ---
             purchased_mail = PurchasedMail.objects.filter(
-                email=email,
-                purchase__employee=employee
+                email=email, purchase__employee=employee
             ).first()
 
             if not purchased_mail:
@@ -782,7 +820,6 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 2. Prevent using purchased mail again
             if purchased_mail.is_used:
                 return Response(
                     {
@@ -792,65 +829,55 @@ class CreatePhoneAccountView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 3. Decode base64 fields
+            # --- Decode base64 field ---
             for field in ["batch", "message", "media"]:
                 if field in data and data[field]:
                     try:
                         decoded = base64.b64decode(data[field]).decode("utf-8")
                         data[field] = strip_proxy(decoded)
-                    except Exception:
+                    except:
                         data[field] = strip_proxy(data[field])
 
-            # 4. Validate serializer
+            # --- Validate serializer ---
             serializer = PhoneAccountSerializer(data=data)
             if not serializer.is_valid():
                 return Response(
-                    {
-                        "status": "fail",
-                        "detail": serializer.errors
-                    },
+                    {"status": "fail", "detail": serializer.errors},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            # 5. Save
+            # --- Save phone_obj ---
             phone_obj = serializer.save(
                 creator=employee,
                 purchased_mail=purchased_mail
             )
 
+            # --- Test curl với retry 3 lần ---
+            is_live = run_curl_with_retry(phone_obj.batch, retries=3)
 
-            # 6. Test curl
-            try:
-                result = run_curl(phone_obj.batch)
-                if "error" in result or result.get("status", 0) >= 400:
-                    phone_obj.status = "die"
-                else:
-                    phone_obj.status = "live"
-                    # 🔥 TẠO CUSTOMER NGAY KHI TẠO PHONE
-                    username = f"({phone_obj.phone[:3]}) {phone_obj.phone[3:6]}-{phone_obj.phone[6:]}"
-                    password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+            if is_live:
+                phone_obj.status = "live"
 
-                    user = User.objects.create_user(username=username, password=password)
+                # 🎯 Tạo CUSTOMER ngay
+                username = f"({phone_obj.phone[:3]}) {phone_obj.phone[3:6]}-{phone_obj.phone[6:]}"
+                password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
 
-                    customer = Customer.objects.create(
-                        user=user,
-                        raw_password=password,
-                        phone_assigned_count=1,
-                        is_provided=False,
-                        provided_at=None
-                    )
+                user = User.objects.create_user(username=username, password=password)
+                customer = Customer.objects.create(
+                    user=user,
+                    raw_password=password,
+                    phone_assigned_count=1
+                )
+                phone_obj.customer = customer
+                phone_obj.save(update_fields=["customer"])
+                print("???? khong tạo customer?")
 
-                    # GÁN CUSTOMER VÀO PHONE
-                    phone_obj.customer = customer
-                    phone_obj.save(update_fields=["customer"])
-
-            except Exception as e:
-                print("Exception while testing curl:", e)
+            else:
                 phone_obj.status = "die"
 
             phone_obj.save(update_fields=["status"])
 
-            # 7. Mark mail used
+            # Mark mail used
             purchased_mail.is_used = True
             purchased_mail.save(update_fields=["is_used"])
 
@@ -869,10 +896,7 @@ class CreatePhoneAccountView(APIView):
         except Exception as e:
             logger.error(f"Lỗi khi tạo PhoneAccount: {e}")
             return Response(
-                {
-                    "status": "error",
-                    "message": "Lỗi hệ thống khi tạo PhoneAccount."
-                },
+                {"status": "error", "message": "Lỗi hệ thống khi tạo PhoneAccount."},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
 
@@ -920,41 +944,21 @@ class RefreshInboxView(APIView):
 
         # --- Call cURL ---
         raw_result = run_curl(obj.batch)
-        if (
-            not raw_result
-            or raw_result.get("error")
-            or raw_result.get("status") != 200
-        ):
+        print('raw_result; ', raw_result)
+        if raw_result.get("status") == "error":
             obj.status = "die_use"
             obj.save(update_fields=["status"])
 
             return Response(
                 {
                     "status": "error",
-                    "message": INBOX_MESSAGES["curl_failed"],
+                    "message": raw_result.get("message"),
                     "detail": raw_result,
                 },
                 status=status.HTTP_502_BAD_GATEWAY,
             )
 
         body = raw_result.get("body")
-
-        # --- Parse JSON ---
-        if not isinstance(body, (dict, list)):
-            try:
-                body = json.loads(body)
-            except Exception:
-                obj.status = "die_use"
-                obj.save(update_fields=["status"])
-
-                return Response(
-                    {
-                        "status": "error",
-                        "message": INBOX_MESSAGES["parse_failed"],
-                        "raw": body,
-                    },
-                    status=status.HTTP_500_INTERNAL_SERVER_ERROR,
-                )
 
         # --- Extract Messages ---
         contacts = {}
@@ -1106,7 +1110,7 @@ class SendMessageView(APIView):
                 curl_text
             )
 
-            print("Updated cURL:\n", updated_curl)
+            logger.info(f"Updated cURL: {updated_curl}", )
 
             # === Send actual message ===
             result = send_pinger_message(
@@ -1147,15 +1151,6 @@ class SendMessageView(APIView):
             )
 
 class SendMediaView(APIView):
-    """
-    ✅ API: Gửi tin nhắn có hình ảnh (media) qua Pinger/TextFree
-    - Upload ảnh qua cURL media, sau đó gửi qua message API
-    - Chỉ role staff hoặc admin được phép gửi
-    - Body (multipart/form-data):
-        phone: số Pinger/TextFree
-        to: số người nhận
-        file: file ảnh (jpg/png)
-    """
     permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
     allowed_roles = ["customer", "admin"]
     throttle_classes = [ScopedRateThrottle]
@@ -1165,133 +1160,67 @@ class SendMediaView(APIView):
         phone = request.data.get("phone")
         to_raw = request.data.get("to")
         to_number, name = normalize_phone_number(to_raw)
-
         file = request.FILES.get("file")
 
-        # Ensure number starts with 1
         if not to_number.startswith("1"):
             to_number = "1" + to_number
 
-        # === Validate input ===
         if not all([phone, to_number, file]):
-            return Response(
-                {"status": "error", "message": SEND_MEDIA_MESSAGES["missing_fields"]},
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
-        try:
-            # === Fetch Pinger account config ===
-            obj = get_object_or_404(PhoneAccount, name=phone)
-
-            if obj.status != "live":
-                return Response(
-                    {
-                        "status": "error",
-                        "message": SEND_MEDIA_MESSAGES["invalid_phone"]
-                    },
-                    status=status.HTTP_400_BAD_REQUEST
-                )
-
-            curl_text = obj.media
-            if not curl_text:
-                return Response(
-                    {
-                        "status": "error",
-                        "message": SEND_MEDIA_MESSAGES["missing_curl"]
-                    },
-                    status=status.HTTP_404_NOT_FOUND
-                )
-
-            # === Parse cURL and prepare headers ===
-            parsed = parse_curl(strip_proxy(curl_text))
-            url = parsed.get("url")
-            headers = parsed.get("headers", {}) or {}
-            headers.pop("Host", None)
-
-            mime_type = file.content_type or "application/octet-stream"
-            headers.update({
-                "Content-Type": mime_type,
-                "Upload-Incomplete": "?0",
-                "Upload-Draft-Interop-Version": "3",
-                "Content-Encoding": "binary",
-                "Accept": "*/*"
-            })
-            for h in ["Accept-Encoding", "Transfer-Encoding", "Content-Length"]:
-                headers.pop(h, None)
-
-            # === Step 1: Upload image ===
-            try:
-                resp = requests.post(url, headers=headers, data=file.file, timeout=60)
-            except Exception as e:
-                logger.error("Image upload failed: %s", str(e))
-                return Response({
-                    "status": "error",
-                    "sent_to": to_number,
-                    "uploaded_image_url": "(upload_failed)",
-                    "status_code": 500,
-                    "message": SEND_MEDIA_MESSAGES["upload_error"]
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-            # === Step 2: Parse upload response ===
-            try:
-                upload_json = resp.json()
-            except Exception:
-                upload_json = {}
-
-            uploaded_image_url = (
-                upload_json.get("url")
-                or upload_json.get("result", {}).get("url")
-                or upload_json.get("result", {}).get("image")
-                or upload_json.get("result", {}).get("media", {}).get("url")
-            )
-
-            if not uploaded_image_url or not str(uploaded_image_url).startswith("http"):
-                return Response({
-                    "status": "error",
-                    "sent_to": to_number,
-                    "uploaded_image_url": "(upload_failed)",
-                    "status_code": 400,
-                    "message": SEND_MEDIA_MESSAGES["invalid_upload_url"]
-                }, status=status.HTTP_400_BAD_REQUEST)
-
-            # === Step 3: Send media message via message API ===
-            try:
-                send_result = send_pinger_message(
-                    message_curl=obj.message,
-                    to_number=to_number,
-                    text=" ",  # required field
-                    media_url=uploaded_image_url,
-                    name=name,
-                )
-            except Exception as e:
-                logger.error("Media send failed: %s", str(e))
-                return Response({
-                    "status": "error",
-                    "message": SEND_MEDIA_MESSAGES["send_failed"]
-                }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
-
-            # === Step 4: Build final response ===
-            response_data = send_result.get("response", {})
-            status_code = send_result.get("status_code", 200)
-
-            if isinstance(response_data, dict) and "errNo" in response_data:
-                status_code = 400
-
-            return Response({
-                "status": "success" if status_code == 200 else "error",
-                "message": SEND_MEDIA_MESSAGES["success"] if status_code == 200 else SEND_MEDIA_MESSAGES["send_failed"],
-                "sent_to": to_number,
-                "uploaded_image_url": uploaded_image_url,
-                "status_code": status_code,
-                "response": response_data
-            }, status=status_code)
-
-        except Exception as e:
-            logger.error("Unknown media send error: %s", str(e))
             return Response({
                 "status": "error",
-                "message": SEND_MEDIA_MESSAGES["unknown_error"]
-            }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+                "message": SEND_MEDIA_MESSAGES["missing_fields"],
+            }, status=400)
+
+        obj = get_object_or_404(PhoneAccount, name=phone)
+
+        if obj.status != "live":
+            return Response({
+                "status": "error",
+                "message": SEND_MEDIA_MESSAGES["invalid_phone"],
+            }, status=400)
+
+        # -------------------------
+        # STEP 1 — UPLOAD MEDIA
+        # -------------------------
+        uploaded_url, err = upload_pinger_media(obj.media, file)
+
+        if err == "upload_failed":
+            return Response({
+                "status": "error",
+                "message": SEND_MEDIA_MESSAGES["upload_error"],
+            }, status=500)
+
+        if err == "invalid_url":
+            return Response({
+                "status": "error",
+                "message": SEND_MEDIA_MESSAGES["invalid_upload_url"],
+            }, status=400)
+
+        # -------------------------
+        # STEP 2 — SEND MESSAGE
+        # -------------------------
+        send_result = send_pinger_message(
+            message_curl=obj.message,
+            to_number=to_number,
+            text=" ",
+            media_url=uploaded_url,
+            name=name
+        )
+
+        status_code = send_result.get("status_code", 200)
+        response_data = send_result.get("response", {})
+
+        if "errNo" in response_data:
+            status_code = 400
+
+        return Response({
+            "status": "success" if status_code == 200 else "error",
+            "message": SEND_MEDIA_MESSAGES["success"] if status_code == 200 else SEND_MEDIA_MESSAGES["send_failed"],
+            "sent_to": to_number,
+            "uploaded_image_url": uploaded_url,
+            "status_code": status_code,
+            "response": response_data
+        }, status=status_code)
 
 
 class MailCategoriesView(APIView):
@@ -1319,7 +1248,7 @@ class MailCategoriesView(APIView):
 
     def get(self, request):
         provider = request.query_params.get("provider")
-        print('provider: ', provider)
+        logger.info(f'provider: {provider}')
         if not provider:
             return Response(
                 {"status": "error", "message": "Thiếu tham số 'provider'."},
@@ -1382,14 +1311,13 @@ class BuyMailView(APIView):
             )
 
         quality = int(request.data.get("quality", 0))
-        print("-----------")
-        print(quality)
+        logger.info(f"quality= {quality}")
         coupon = request.data.get("coupon", "")
 
         try:
             if provider == "sellmmo":
                 result = buy_mail_sellmmo(employee=user, product_id=product_id, amount=quality, coupon=coupon)
-                print('result: ', result)
+                logger.info(f'result: {result}')
             elif provider == "dongvan":
                 result = buy_mail_dongvan(employee=user, account_type=product_id, quality=quality)
 
@@ -1567,6 +1495,7 @@ class SaveAppleMailView(APIView):
                 "message": "Lỗi hệ thống khi lưu Apple Mail Proxy."
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class SaveTextNowAccountView(APIView):
     """
     ✅ API: Lưu hoặc cập nhật tài khoản TextNow
@@ -1640,6 +1569,7 @@ class SaveTextNowAccountView(APIView):
                 "message": f"Lỗi hệ thống"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
 
+
 class EmployeePhoneSummaryView(APIView):
     """
     ✅ API: Thống kê số lượng PhoneAccount mà nhân viên đã tạo (Pinger, TextNow)
@@ -1675,7 +1605,6 @@ class EmployeePhoneSummaryView(APIView):
                 creator=employee,
                 created_at__date=today
             )
-            print('pinger_today_qs: ', pinger_today_qs)
             pinger_today = pinger_today_qs.count()
             pinger_today_live = pinger_today_qs.filter(status="live").count()
             pinger_today_die = pinger_today_qs.filter(
@@ -1870,7 +1799,7 @@ class PhoneReportByEmployeeView(APIView):
                 disabled_import=Count("id", filter=Q(status="die")),
                 disabled_after=Count("id", filter=Q(status__in=["lock", "die_use"])),
             )
-            .order_by("creator__user__username", "created_at__date")
+            .order_by("-created_at__date", "creator__user__username")  # 🔥 mới nhất → cũ nhất
         )
 
         records = []
@@ -2001,14 +1930,14 @@ class PhoneReportByGroupSoldView(APIView):
         )
 
         all_groups = EmployeeGroup.objects.order_by("name")
-        sold_queryset = queryset.filter(customer__isnull=False)
+        sold_queryset = queryset.filter(is_used=True, customer__isnull=False)
 
         by_group_sold = sold_queryset.values("creator__group__name").annotate(
             sdt_da_cap=Count("id")
         )
 
         stats_group_sold = {g["creator__group__name"]: g for g in by_group_sold}
-        total_all_phone = queryset.filter(is_used=True).count() or 1
+        total_all_phone = queryset.filter(is_used=True, customer__isnull=False).count() or 1
 
         records = []
         for grp in all_groups:
@@ -2047,9 +1976,10 @@ class PhoneOverviewView(APIView):
             total_sdt = PhoneAccount.objects.count()
             healthy_sdt = PhoneAccount.objects.filter(status="live").count()
             disabled_sdt = PhoneAccount.objects.filter(~Q(status="live")).count()
-            sold_sdt = PhoneAccount.objects.filter(customer__isnull=False).count()
+            sold_sdt = PhoneAccount.objects.filter(is_used=True, customer__isnull=False).count()
+      
             waiting_sdt = PhoneAccount.objects.filter(
-                is_used=False, status="live"
+                is_used=False, status="live", customer__isnull=False
             ).count()
 
             data = {
@@ -2072,6 +2002,52 @@ class PhoneOverviewView(APIView):
                 "status": "error",
                 "message": f"Lỗi khi lấy thống kê"
             }, status=status.HTTP_500_INTERNAL_SERVER_ERROR)
+
+class BulkResetPasswordView(APIView):
+    permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
+    allowed_roles = ["admin"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'light'
+
+    def post(self, request):
+        customer_ids = request.data.get("customer_ids", [])
+        if not customer_ids:
+            return Response({"status": "error", "message": "customer_ids required"}, status=400)
+
+        task = bulk_reset_password_task.delay(customer_ids)
+
+        return Response({
+            "status": "queued",
+            "task_id": task.id
+        })
+        
+class TaskStatusView(APIView):
+    permission_classes = [permissions.IsAuthenticated]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'light'
+
+    def get(self, request, task_id):
+        result = AsyncResult(task_id)
+
+        if result.state == "PENDING":
+            return Response({"status": "pending"})
+
+        if result.state == "STARTED":
+            return Response({"status": "running"})
+
+        if result.state == "FAILURE":
+            return Response({
+                "status": "error",
+                "message": str(result.result)
+            })
+
+        if result.state == "SUCCESS":
+            return Response({
+                "status": "success",
+                "data": result.result.get("data", [])
+            })
+
+        return Response({"status": result.state.lower()})
 
 def healthz(request):
     return HttpResponse("OK")

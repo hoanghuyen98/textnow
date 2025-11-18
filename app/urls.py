@@ -34,6 +34,8 @@ urlpatterns = [
     # khách hàng
     path('customer_info/',views.CustomerInfoView.as_view(), name='customer_info'),
     path('auto_create_customers/',views.AutoCreateCustomerView.as_view(), name='auto_create_customers'),
+    path('reset_password/', views.BulkResetPasswordView.as_view(), name='reset_password'),
+    path("task_status/<str:task_id>/", views.TaskStatusView.as_view()),
 
     # login/logout
     path("login/", views.CustomTokenObtainPairView.as_view(), name="token_obtain_pair"),

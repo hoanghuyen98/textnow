@@ -7,6 +7,8 @@ from datetime import timedelta
 from logzero import logger
 import random, string
 from django.contrib.auth.models import User
+import secrets
+from django.contrib.auth.hashers import make_password
 
 @shared_task
 def check_phone_all_batches():
@@ -169,3 +171,47 @@ def check_all_batches():
     logger.info("🔥 Task check_all_batches đang chạy...")
     # ví dụ logic thật của bạn
     return {"result": "OK"}
+
+@shared_task
+def check_celery():
+    logger.info("🔥 Task check_all_batches đang chạy...")
+    # ví dụ logic thật của bạn
+    return {"result": "OK"}
+
+@shared_task()
+def bulk_reset_password_task(customer_ids):
+    customers = Customer.objects.select_related("user").filter(id__in=customer_ids)
+    logger.info("info--------")
+    logger.info(customers)
+    if not customers.exists():
+        return {"status": "error", "message": "No customers found"}
+
+    reset_data = []
+    updated_users = []
+    updated_customers = []
+
+    with transaction.atomic():
+        for cus in customers:
+            new_pass = secrets.token_hex(5)
+
+            hashed = make_password(new_pass)
+            cus.raw_password = new_pass
+            updated_customers.append(cus)
+
+            user = cus.user
+            user.password = hashed
+            updated_users.append(user)
+
+            reset_data.append({
+                "customer_id": cus.id,
+                "username": cus.user.username,
+                "new_password": new_pass,
+            })
+
+        User.objects.bulk_update(updated_users, ["password"])
+        Customer.objects.bulk_update(updated_customers, ["raw_password"])
+
+    return {
+        "status": "success",
+        "data": reset_data
+    }

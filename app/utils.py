@@ -71,6 +71,56 @@ def normalize_phone_number(raw_number: str):
 
     return digits, name
 
+def extract_auth_code(html_content: str) -> str | None:
+    """
+    Trích mã xác minh (4–8 chữ số) từ nội dung HTML email.
+    - Ưu tiên vùng có chứa "code", "verify", "xác minh"
+    - Bỏ qua các số trong CSS, màu (#fff), px, %, rgba,...
+    """
+    if not html_content:
+        return None
+
+    # 🔹 Cắt vùng có chứa "code" / "verify" / "xác minh" (nếu có)
+    match_section = re.search(r"(?is)(.{0,200}(code|verify|xác minh).{0,200})", html_content)
+    snippet = match_section.group(0) if match_section else html_content
+
+    # 🔹 Bước 1: tìm dãy số 4–8 chữ số gần từ khóa code/verify/xác minh
+    match = re.search(r"(?i)(?:code|verify|xác minh)[^0-9]{0,20}(\d{4,8})", snippet)
+    if match:
+        return match.group(1)
+
+    # 🔹 Bước 2: fallback – tìm trong các thẻ HTML (b, strong, span, p, div)
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+        for tag in soup.find_all(["b", "strong", "span", "p", "div"]):
+            text = tag.get_text(strip=True)
+            # Bỏ qua số trong định dạng style
+            if not text or re.search(r"(px|rgb|rgba|#|%)", text):
+                continue
+            if re.fullmatch(r"\d{4,8}", text):
+                return text
+    except Exception as e:
+        logger.warning(f"Lỗi BeautifulSoup khi parse HTML: {e}")
+
+    return None
+
+def replace_proxy(c: str, new_proxy: str) -> str:
+    if not c:
+        return c
+
+    # Thay thế proxy cũ bằng proxy mới
+    c = re.sub(
+        r"(\\\s*)?--proxy(?:=)?\s*['\"]?[^ \n\r'\"]+['\"]?",
+        f"--proxy {new_proxy}",
+        c,
+        flags=re.IGNORECASE
+    )
+
+    # Dọn whitespace dư
+    c = re.sub(r"\\\s*\n", " ", c)
+    c = re.sub(r"\s{2,}", " ", c).strip()
+    return c
+
 def strip_proxy(c: str) -> str:
 
     if not c:
@@ -116,55 +166,42 @@ def parse_curl(c):
     h.pop("Host", None)
     return {"method": m, "url": u, "headers": h, "data": d}
 
-def extract_auth_code(html_content: str) -> str | None:
-    """
-    Trích mã xác minh (4–8 chữ số) từ nội dung HTML email.
-    - Ưu tiên vùng có chứa "code", "verify", "xác minh"
-    - Bỏ qua các số trong CSS, màu (#fff), px, %, rgba,...
-    """
-    if not html_content:
-        return None
-
-    # 🔹 Cắt vùng có chứa "code" / "verify" / "xác minh" (nếu có)
-    match_section = re.search(r"(?is)(.{0,200}(code|verify|xác minh).{0,200})", html_content)
-    snippet = match_section.group(0) if match_section else html_content
-
-    # 🔹 Bước 1: tìm dãy số 4–8 chữ số gần từ khóa code/verify/xác minh
-    match = re.search(r"(?i)(?:code|verify|xác minh)[^0-9]{0,20}(\d{4,8})", snippet)
-    if match:
-        return match.group(1)
-
-    # 🔹 Bước 2: fallback – tìm trong các thẻ HTML (b, strong, span, p, div)
-    try:
-        soup = BeautifulSoup(html_content, "html.parser")
-        for tag in soup.find_all(["b", "strong", "span", "p", "div"]):
-            text = tag.get_text(strip=True)
-            # Bỏ qua số trong định dạng style
-            if not text or re.search(r"(px|rgb|rgba|#|%)", text):
-                continue
-            if re.fullmatch(r"\d{4,8}", text):
-                return text
-    except Exception as e:
-        logger.warning(f"Lỗi BeautifulSoup khi parse HTML: {e}")
-
-    return None
-
 
 def run_curl(curl_text):
-    c = strip_proxy(curl_text)
-    p = parse_curl(c)
+    # Thay thế proxy trong curl
+    curl_text = replace_proxy(curl_text, PROXY_US)
+    print("----------------------------------------")
+    # Parse curl
+    p = parse_curl(curl_text)
     if not p["url"]:
         return {"error": "No URL found"}
 
+    proxy = {
+        "http": PROXY_US,
+        "https": PROXY_US,
+    }
+
     h, d = p["headers"], p["data"]
+
     try:
         if d and "application/json" in h.get("Content-Type", ""):
             try:
-                resp = requests.request(p["method"], p["url"], json=json.loads(d), headers=h)
+                resp = requests.request(
+                    p["method"], p["url"], 
+                    json=json.loads(d), headers=h, proxies=proxy
+                )
+                print("----------------------------------------: ", proxy)
             except Exception:
-                resp = requests.request(p["method"], p["url"], data=d, headers=h)
+                resp = requests.request(
+                    p["method"], p["url"], 
+                    data=d, headers=h, proxies=proxy
+                )
         else:
-            resp = requests.request(p["method"], p["url"], data=d, headers=h)
+            resp = requests.request(
+                p["method"], p["url"], 
+                data=d, headers=h, proxies=proxy
+            )
+
     except Exception as e:
         return {"error": str(e)}
 
@@ -172,11 +209,34 @@ def run_curl(curl_text):
         body = resp.json()
     except Exception:
         body = resp.text
-        logger.info(f"run_curl_body: {body}")
-    return {"status": resp.status_code, "headers": dict(resp.headers), "body": body}
+
+    if isinstance(body, dict) and "result" in body:
+        for item in body.get("result", []):
+            raw = item.get("body")
+            if not raw:
+                continue
+
+            try:
+                parsed = json.loads(raw)
+            except:
+                continue
+
+            # Nếu có lỗi → trả về error ngay
+            if "errNo" in parsed or "errMsg" in parsed:
+                return {
+                    "status": "error",
+                    "message": parsed.get("errMsg", "Unknown error"),
+                    "code": parsed.get("errNo")
+                }
+
+    # Nếu không lỗi → thành công
+    return {
+        "status": "success",
+        "body": body
+    }
 
 
-def run_curl_with_retry(batch_cmd: str, retries: int = 3, delay: float = 1.0):
+def run_curl_with_retry(batch_cmd: str, retries: int = 1, delay: float = 1.0):
     """
     Gọi run_curl(batch_cmd) tối đa 3 lần.
     Nếu bất kỳ lần nào trả về status < 400 → coi như live.
@@ -226,53 +286,66 @@ def send_pinger_message(
     name: str = None,
 ):
     """
-    Gửi tin nhắn qua API Pinger (/2.2/message).
-    - message_curl: cURL mẫu lưu trong DB (PhoneAccount.message)
-    - to_number: số điện thoại người nhận (dạng chuỗi số, ví dụ "18573675730")
-    - text: nội dung tin nhắn (bắt buộc nếu không có ảnh)
-    - media_url: URL ảnh (nếu có)
-    - link_url: link đính kèm (nếu có)
+    Gửi tin nhắn qua API Pinger bằng CURL mẫu nhưng override proxy.
     """
 
-    # --- Parse cURL (loại bỏ proxy, trích headers/url/body)
-    parsed = parse_curl(strip_proxy(message_curl))
+    # 1) Thay proxy trong curl = proxy của bạn
+    message_curl = replace_proxy(message_curl, PROXY_US)
+
+    # 2) Parse curl (headers, url, body)
+    parsed = parse_curl(message_curl)
     msg_url = parsed.get("url")
     headers = parsed.get("headers", {})
     raw_data = parsed.get("data", "")
 
-    # --- Parse JSON gốc trong cURL body
+    # 3) Parse JSON gốc
     try:
         body = json.loads(raw_data) if raw_data else {}
     except json.JSONDecodeError:
         body = {}
 
-    # --- Ghi đè nội dung gửi
+    # 4) Ghi đè nội dung gửi
     body["text"] = text or " "
     body["to"] = [{
         "name": name,
         "TN": to_number
     }]
+
+    # Ghi log để debug
     logger.info(f'send_pinger_message_body: {body}')
+
     if media_url:
         body["media"] = {"image": media_url}
     if link_url:
         body["link"] = {"url": link_url}
 
-    # --- Gửi request thực
+    # 5) Proxy config (luôn dùng proxy của bạn)
+    proxy_cfg = {
+        "http": PROXY_US,
+        "https": PROXY_US,
+    }
+
+    # 6) Gửi request thật
     try:
-        resp = requests.post(msg_url, headers=headers, json=body, timeout=30)
+        resp = requests.post(
+            msg_url,
+            headers=headers,
+            json=body,
+            proxies=proxy_cfg, 
+            timeout=30
+        )
         logger.info(f'resp: {resp}')
     except requests.RequestException as e:
         return {"status": "error", "message": f"network_error {str(e)}"}
 
-    # --- Xử lý kết quả trả về
+    # 7) Parse response
     try:
         result = resp.json()
         logger.info(f'result: {result}')
     except Exception:
         result = resp.text
 
-    # --- Nếu có errNo thì fail ---
+    # 8) Lỗi từ server Pinger
     if isinstance(result, dict) and "errNo" in result:
         return {
             "status": "error",
@@ -282,7 +355,7 @@ def send_pinger_message(
             "body_sent": body,
         }
 
-    # --- Nếu HTTP lỗi ---
+    # 9) Lỗi HTTP
     if resp.status_code >= 400:
         return {
             "status": "error",
@@ -292,11 +365,71 @@ def send_pinger_message(
             "body_sent": body,
         }
 
-    # --- Thành công ---
+    # 10) Thành công
     return {
-        "status": "status",
+        "status": "success",
         "status_code": resp.status_code,
         "response": result,
-        "message": "Image message sent successfully.",
+        "message": "Message sent successfully.",
         "body_sent": body,
     }
+
+
+def upload_pinger_media(curl_text: str, file):
+    """
+    Upload ảnh qua Pinger Media API bằng cURL mẫu + override proxy.
+    """
+
+    # 1) Thay proxy trong curl
+    curl_text = replace_proxy(curl_text, PROXY_US)
+
+    # 2) Parse curl
+    parsed = parse_curl(curl_text)
+    url = parsed.get("url")
+    headers = parsed.get("headers", {}) or {}
+    headers.pop("Host", None)
+
+    # 3) Chuẩn hóa headers để upload binary file
+    mime_type = file.content_type or "application/octet-stream"
+    headers.update({
+        "Content-Type": mime_type,
+        "Upload-Incomplete": "?0",
+        "Upload-Draft-Interop-Version": "3",
+        "Content-Encoding": "binary",
+        "Accept": "*/*",
+    })
+    for h in ["Accept-Encoding", "Transfer-Encoding", "Content-Length"]:
+        headers.pop(h, None)
+
+    proxy_cfg = {"http": PROXY_US, "https": PROXY_US}
+
+    # 4) Upload file
+    try:
+        resp = requests.post(
+            url,
+            headers=headers,
+            data=file.file,
+            proxies=proxy_cfg,
+            timeout=60
+        )
+    except Exception as e:
+        logger.error(f"Media upload failed: {str(e)}")
+        return None, "upload_failed"
+
+    # 5) Parse response JSON
+    try:
+        data = resp.json()
+    except:
+        data = {}
+
+    uploaded_url = (
+        data.get("url")
+        or data.get("result", {}).get("url")
+        or data.get("result", {}).get("image")
+        or data.get("result", {}).get("media", {}).get("url")
+    )
+
+    if not uploaded_url or not str(uploaded_url).startswith("http"):
+        return None, "invalid_url"
+
+    return uploaded_url, None
