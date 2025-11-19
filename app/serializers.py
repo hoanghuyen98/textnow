@@ -233,6 +233,9 @@ class PhoneAccountSerializer(serializers.ModelSerializer):
         elif not re.match(r'^\(\d{3}\)\s?\d{3}-\d{4}$', normalize_name):
             errors["phone"] = "Số điện thoại phải có dạng (234) 123-1234."
 
+        email = data.get("mail") or data.get("email")
+        employee = self.context.get("employee")
+
         # =====================================================
         # 🔹 Trích xuất OAuth fields từ 3 loại curl
         # =====================================================
@@ -274,7 +277,7 @@ class PhoneOfCustomerSimpleSerializer(serializers.ModelSerializer):
     status_display  = serializers.CharField(source="get_status_display", read_only=True)
     class Meta:
         model = PhoneAccount
-        fields = ["id", "name", "phone", "status", "status_display", "created_at"]
+        fields = ["id", "name", "phone", "status", "status_display", "is_used", "created_at"]
 
 
 class CustomerAssignHistorySerializer(serializers.ModelSerializer):
@@ -338,8 +341,8 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
         for phone in available_phones:
 
             phone.is_used = True
-            phone.updated_at = now
-            phone.save(update_fields=["is_used", "updated_at"])
+            phone.date_use = now
+            phone.save()
 
             created_list.append({
                 "phone": phone.phone,
@@ -369,7 +372,7 @@ class CustomerSerializer(serializers.ModelSerializer):
     raw_password = serializers.CharField(read_only=True, required=False)
     class Meta:
         model = Customer
-        fields = ["id", "username", "password", "raw_password", "phone_assigned_count", "phones", "created_at"]
+        fields = ["id", "username", "password", "raw_password", "phone_assigned_count", "phones", "created_at", "updated_at", "date_use"]
 
 
     def get_phones(self, obj):

@@ -1,7 +1,10 @@
 from django.db import models
 import hashlib
 from django.contrib.auth.models import User
+import uuid
 
+def gen_uuid():
+    return str(uuid.uuid4())
 
 class EmployeeGroup(models.Model):
     name = models.CharField(max_length=100)
@@ -67,6 +70,25 @@ class CustomerAssignHistory(models.Model):
         return f"Lần cấp {self.phone_count} số - {self.created_at}"
 
 
+class MessageHistoryLog(models.Model):
+    message_id = models.CharField(default=gen_uuid, editable=False, null=True, blank=True, max_length=255)
+    # ⬇ mỗi log gắn với 1 customer (1 khách → nhiều log)
+    phone = models.ForeignKey(
+        "PhoneAccount",
+        on_delete=models.CASCADE,
+        related_name="phone_logs",
+        null=True,
+        blank=True
+    )
+
+    data = models.JSONField(null=True, blank=True)
+    created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
+    updated_at = models.DateTimeField(auto_now=True)
+
+    def __str__(self):
+        return f"{self.phone} - {self.last_text}"
+
+
 class Customer(models.Model):
     user = models.OneToOneField(
         User,
@@ -75,7 +97,7 @@ class Customer(models.Model):
     )
     raw_password = models.TextField(blank=True, null=True)
     phone_assigned_count = models.PositiveIntegerField(default=0)
-
+    date_use = models.DateTimeField(blank=True, null=True)
     created_at = models.DateTimeField(auto_now_add=True, blank=True, null=True)
     updated_at = models.DateTimeField(auto_now=True, blank=True, null=True)
 

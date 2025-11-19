@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from django.db.models import Count, Q, OuterRef, Subquery, Min
 from rest_framework.decorators import api_view, permission_classes
 import base64
-from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer, MailTransaction, AppleMailProxy, CustomerAssignHistory
+from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer, MailTransaction, AppleMailProxy, CustomerAssignHistory, MessageHistoryLog
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .utils import run_curl, parse_curl, strip_proxy, send_pinger_message, normalize_phone_number, parse_time, to_utc_isoformat, run_curl_with_retry, upload_pinger_media
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -32,7 +32,7 @@ from functools import wraps
 from drf_yasg.utils import swagger_auto_schema
 from django.db import transaction
 from datetime import datetime, date
-from .tasks import check_phone_all_batches, bulk_reset_password_task, check_celery
+from .tasks import check_phone_all_batches, bulk_reset_password_task, check_celery, process_phoneaccount_background
 from rest_framework.throttling import ScopedRateThrottle
 from drf_yasg import openapi
 from .response_messages import PHONE_MESSAGES, INBOX_MESSAGES, SEND_MESSAGE_MESSAGES, SEND_MEDIA_MESSAGES
@@ -43,6 +43,7 @@ from .exceptions import BadRequest, Unauthorized, NotFound
 import secrets
 from concurrent.futures import ThreadPoolExecutor
 from celery.result import AsyncResult
+from django.core.cache import cache
 
 # from rest_framework_simplejwt.authentication import JWTAuthentication
 
@@ -66,7 +67,7 @@ class CheckStatusView(APIView):
     """
 
     def post(self, request):
-        task = check_celery.delay()
+        task = check_phone_all_batches.delay()
         return Response({
             "task_id": task.id,
             "status": "queued"
@@ -842,7 +843,7 @@ class CreatePhoneAccountView(APIView):
             serializer = PhoneAccountSerializer(data=data)
             if not serializer.is_valid():
                 return Response(
-                    {"status": "fail", "detail": serializer.errors},
+                    {"status": "fail", "detail": serializer.errors, "message": "Dữ liệu đã tồn tại"},
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
@@ -851,47 +852,12 @@ class CreatePhoneAccountView(APIView):
                 creator=employee,
                 purchased_mail=purchased_mail
             )
+            task = process_phoneaccount_background.delay(phone_obj.id)
 
-            # --- Test curl với retry 3 lần ---
-            is_live = run_curl_with_retry(phone_obj.batch, retries=3)
-
-            if is_live:
-                phone_obj.status = "live"
-
-                # 🎯 Tạo CUSTOMER ngay
-                username = f"({phone_obj.phone[:3]}) {phone_obj.phone[3:6]}-{phone_obj.phone[6:]}"
-                password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
-
-                user = User.objects.create_user(username=username, password=password)
-                customer = Customer.objects.create(
-                    user=user,
-                    raw_password=password,
-                    phone_assigned_count=1
-                )
-                phone_obj.customer = customer
-                phone_obj.save(update_fields=["customer"])
-                print("???? khong tạo customer?")
-
-            else:
-                phone_obj.status = "die"
-
-            phone_obj.save(update_fields=["status"])
-
-            # Mark mail used
-            purchased_mail.is_used = True
-            purchased_mail.save(update_fields=["is_used"])
-
-            return Response(
-                {
-                    "status": "success",
-                    "message": f"Tạo Phone thành công (trạng thái: {phone_obj.status})",
-                    "phone": phone_obj.phone,
-                    "email": email,
-                    "mail_status": "marked_used",
-                    "creator": request.user.username
-                },
-                status=status.HTTP_201_CREATED
-            )
+            return Response({
+                "status": "success",
+                "task_id": task.id
+            })
 
         except Exception as e:
             logger.error(f"Lỗi khi tạo PhoneAccount: {e}")
@@ -924,15 +890,6 @@ class RefreshInboxView(APIView):
         # --- Fetch PhoneAccount ---
         obj = get_object_or_404(PhoneAccount, name=phone)
 
-        if obj.status != "live":
-            return Response(
-                {
-                    "status": "error",
-                    "message": INBOX_MESSAGES["invalid_phone"]
-                },
-                status=status.HTTP_400_BAD_REQUEST
-            )
-
         if not obj.batch:
             return Response(
                 {
@@ -942,21 +899,36 @@ class RefreshInboxView(APIView):
                 status=status.HTTP_404_NOT_FOUND
             )
 
-        # --- Call cURL ---
-        raw_result = run_curl(obj.batch)
-        print('raw_result; ', raw_result)
-        if raw_result.get("status") == "error":
-            obj.status = "die_use"
-            obj.save(update_fields=["status"])
+        if obj.status != "live":
+            print("so dien thoai die roi:(())")
+            redis_key = f"message_history:{obj.phone}"
+            raw = cache.get(redis_key)
+            raw_result = json.loads(raw)
+            print('raw_result: ', raw_result)
+            if not raw_result:
+                return Response(
+                    {"status": "error", "message": "Không có lịch sử trong cache"},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+            # raw_result = json.loads(raw)
 
-            return Response(
-                {
-                    "status": "error",
-                    "message": raw_result.get("message"),
-                    "detail": raw_result,
-                },
-                status=status.HTTP_502_BAD_GATEWAY,
-            )
+        else:
+            # --- Call cURL ---
+            print("ko vao dây")
+            raw_result = run_curl(obj.batch)
+            print('raw_result; ', raw_result)
+            if raw_result.get("status") == "error":
+                obj.status = "die_use"
+                obj.save(update_fields=["status"])
+
+                return Response(
+                    {
+                        "status": "error",
+                        "message": raw_result.get("message"),
+                        "detail": raw_result,
+                    },
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
 
         body = raw_result.get("body")
 
@@ -2017,7 +1989,7 @@ class BulkResetPasswordView(APIView):
         task = bulk_reset_password_task.delay(customer_ids)
 
         return Response({
-            "status": "queued",
+            "status": "success",
             "task_id": task.id
         })
         
@@ -2028,7 +2000,7 @@ class TaskStatusView(APIView):
 
     def get(self, request, task_id):
         result = AsyncResult(task_id)
-
+        print('task_id: ', task_id)
         if result.state == "PENDING":
             return Response({"status": "pending"})
 

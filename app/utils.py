@@ -170,7 +170,6 @@ def parse_curl(c):
 def run_curl(curl_text):
     # Thay thế proxy trong curl
     curl_text = replace_proxy(curl_text, PROXY_US)
-    print("----------------------------------------")
     # Parse curl
     p = parse_curl(curl_text)
     if not p["url"]:
@@ -190,7 +189,6 @@ def run_curl(curl_text):
                     p["method"], p["url"], 
                     json=json.loads(d), headers=h, proxies=proxy
                 )
-                print("----------------------------------------: ", proxy)
             except Exception:
                 resp = requests.request(
                     p["method"], p["url"], 

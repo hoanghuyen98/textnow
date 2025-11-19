@@ -1,14 +1,18 @@
 from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
-from .models import PhoneAccount, Customer
+import json
+from .models import PhoneAccount, Customer, MessageHistoryLog
 from .utils import run_curl
 from datetime import timedelta
 from logzero import logger
 import random, string
 from django.contrib.auth.models import User
+from django.core.cache import cache
 import secrets
 from django.contrib.auth.hashers import make_password
+from .utils import run_curl_with_retry
+
 
 @shared_task
 def check_phone_all_batches():
@@ -37,7 +41,6 @@ def check_phone_all_batches():
         # =============================
         if not curl_text or not curl_text.strip():
             phone.status = "die"
-            phone.updated_at = now
             phone.save()
 
             died += 1
@@ -75,8 +78,12 @@ def check_phone_all_batches():
             success += 1
             msg = "Kết nối OK (reset 24h)"
             logger.info(f"[{phone.phone}] ✅ {msg}")
-
-        phone.updated_at = now
+            
+            REDIS_TTL = 42 * 60 * 60 
+            redis_key = f"message_history:{phone.phone}"
+            logger.info('đã lưu vào redis')
+            # --- 2. Luôn cập nhật curl_text và reset TTL ---
+            cache.set(redis_key, json.dumps(result), timeout=REDIS_TTL)
 
         # =============================
         # 3) LIVE > 72h → lock
@@ -181,8 +188,7 @@ def check_celery():
 @shared_task()
 def bulk_reset_password_task(customer_ids):
     customers = Customer.objects.select_related("user").filter(id__in=customer_ids)
-    logger.info("info--------")
-    logger.info(customers)
+    logger.info("task bulk_reset_password_task")
     if not customers.exists():
         return {"status": "error", "message": "No customers found"}
 
@@ -215,3 +221,47 @@ def bulk_reset_password_task(customer_ids):
         "status": "success",
         "data": reset_data
     }
+
+@shared_task
+def process_phoneaccount_background(phone_id):
+    try:
+        phone_obj = PhoneAccount.objects.get(id=phone_id)
+        purchased_mail = phone_obj.purchased_mail
+
+        # --- Check xem số live hay die ---
+        is_live = run_curl_with_retry(phone_obj.batch, retries=3)
+
+        if is_live:
+            phone_obj.status = "live"
+
+            p = phone_obj.phone
+            username = f"({p[:3]}) {p[3:6]}-{p[6:]}"
+            password = ''.join(random.choices(string.ascii_letters + string.digits, k=12))
+
+            # --- Tạo User ---
+            user = User.objects.create_user(username=username, password=password)
+
+            # --- Tạo Customer ---
+            customer = Customer.objects.create(
+                user=user,
+                raw_password=password,
+                phone_assigned_count=1
+            )
+
+            phone_obj.customer = customer
+
+        else:
+            phone_obj.status = "die"
+
+        # --- Save changes ---
+        phone_obj.save(update_fields=["status", "customer"])
+
+        # Mark mail used
+        purchased_mail.is_used = True
+        purchased_mail.save(update_fields=["is_used"])
+        print("đã xong")
+        return {"status": "success", "phone": phone_obj.phone}
+
+    except Exception as e:
+        logger.info("❌ Error in create phone task:", e)
+        return {"status": "error", "message": "Có lỗi xảy ra trong quá trình tạo phone, vui lòng tạo lại"}
