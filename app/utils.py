@@ -234,35 +234,51 @@ def run_curl(curl_text):
     }
 
 
-def run_curl_with_retry(batch_cmd: str, retries: int = 1, delay: float = 1.0):
+def run_curl_with_retry(batch_cmd: str, retries: int = 3, delay: float = 1.0):
     """
     Gọi run_curl(batch_cmd) tối đa 3 lần.
     Nếu bất kỳ lần nào trả về status < 400 → coi như live.
     Nếu lỗi hoặc status >= 400 → thử lại tối đa 3 lần.
     """
+
     for attempt in range(1, retries + 1):
         try:
             result = run_curl(batch_cmd)
 
-            # Nếu result rỗng → retry
+            # Nếu result rỗng
             if not result:
                 logger.warning(f"[Retry {attempt}] Empty result")
                 time.sleep(delay)
                 continue
 
-            # Nếu có field error → retry
+            # Nếu có trường "error"
             if "error" in result:
                 logger.warning(f"[Retry {attempt}] Error: {result.get('error')}")
                 time.sleep(delay)
                 continue
 
-            # Nếu status >= 400 → retry
-            if result.get("status", 500) >= 400:
-                logger.warning(f"[Retry {attempt}] Status >=400: {result.get('status')}")
+            # -------------------------
+            # FIX: Chuẩn hóa status_code
+            # -------------------------
+            raw_status = result.get("status")
+
+            if raw_status == "success":
+                status_code = 200
+            elif raw_status == "error":
+                status_code = 500
+            else:
+                try:
+                    status_code = int(raw_status)
+                except (TypeError, ValueError):
+                    status_code = 500
+
+            # Nếu status lỗi ≥ 400 → retry
+            if status_code >= 400:
+                logger.warning(f"[Retry {attempt}] Status >=400: {status_code}")
                 time.sleep(delay)
                 continue
 
-            # ➜ Thành công
+            # Thành công
             logger.info(f"[Retry {attempt}] CURL thành công → LIVE")
             return True
 
@@ -270,7 +286,7 @@ def run_curl_with_retry(batch_cmd: str, retries: int = 1, delay: float = 1.0):
             logger.error(f"[Retry {attempt}] Exception: {e}")
             time.sleep(delay)
 
-    # ➜ Sau 3 lần vẫn thất bại
+    # Sau 3 lần retry thất bại
     logger.error("[Retry] Tất cả retry đều thất bại → DIE")
     return False
 

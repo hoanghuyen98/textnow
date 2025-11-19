@@ -37,25 +37,6 @@ def check_phone_all_batches():
         curl_text = phone.batch
 
         # =============================
-        # 1) Không có batch → die
-        # =============================
-        if not curl_text or not curl_text.strip():
-            phone.status = "die"
-            phone.save()
-
-            died += 1
-
-            msg = "❌ Không có batch → Đánh die"
-            logs.append({
-                "phone": phone.phone,
-                "status": "die",
-                "message": msg,
-                "checked_at": now.strftime("%Y-%m-%d %H:%M:%S"),
-            })
-            logger.info(f"[{phone.phone}] {msg}")
-            continue
-
-        # =============================
         # 2) Có batch → chạy curl
         # =============================
         result = run_curl(curl_text)
@@ -229,7 +210,7 @@ def process_phoneaccount_background(phone_id):
         purchased_mail = phone_obj.purchased_mail
 
         # --- Check xem số live hay die ---
-        is_live = run_curl_with_retry(phone_obj.batch, retries=3)
+        is_live = run_curl_with_retry(phone_obj.batch, retries=2)
 
         if is_live:
             phone_obj.status = "live"

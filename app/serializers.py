@@ -12,6 +12,8 @@ from django.utils import timezone
 import random, string
 from django.contrib.auth.hashers import make_password
 import time
+from django.db import transaction
+
 
 class AppleMailProxySerializer(serializers.ModelSerializer):
     employee_name = serializers.CharField(source="employee.user.username", read_only=True)
@@ -312,21 +314,26 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
 
     def create(self, validated_data):
         request_user = self.context["request"].user
-        
         phone_count = validated_data["phone_count"]
-        logger.info(f"phone_count: {phone_count}")
+        now = timezone.now()
 
-        # LẤY PHONE CÓ CUSTOMER + CÒN LIVE + CHƯA DÙNG
-        available_phones = list(
-            PhoneAccount.objects.filter(
+        # KHÓA ROW LẠI, TRÁNH BỊ 2 REQUEST CÙNG LẤY
+        available_phones_qs = (
+            PhoneAccount.objects
+            .filter(
                 status="live",
                 is_used=False,
-                customer__isnull=False
+                customer__isnull=False,
             )
             .select_related("customer", "customer__user")
-            .order_by("created_at")[: phone_count]
+            .order_by("created_at")
         )
-        logger.info(f"available_phones: {available_phones}")
+
+        available_phones = list(available_phones_qs[: phone_count])
+
+        logger.debug(available_phones)
+        for phone in available_phones:
+            print(f"[PYTHON] Phone {phone.phone} - is_used={phone.is_used} - customer={phone.customer_id}")
 
         if len(available_phones) < phone_count:
             return {
@@ -336,19 +343,20 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
             }
 
         created_list = []
-        now = timezone.now()
-        
-        for phone in available_phones:
 
+        for phone in available_phones:
             phone.is_used = True
+            print("phone_is_used: ", phone.is_used)
             phone.date_use = now
             phone.save()
 
             created_list.append({
                 "phone": phone.phone,
                 "username": phone.customer.user.username,
+                "is_used": phone.is_used,
                 "password": phone.customer.raw_password,
             })
+
 
         CustomerAssignHistory.objects.create(
             phone_count=phone_count,
@@ -356,13 +364,12 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
             creator=request_user
         )
 
-
         return {
             "status": "success",
             "message": f"Đã cấp thành công {phone_count} số cho khách.",
             "data": created_list
         }
-    
+        
 
 class CustomerSerializer(serializers.ModelSerializer):
     username = serializers.CharField(source="user.username", required=False)
@@ -397,24 +404,6 @@ class CustomerSerializer(serializers.ModelSerializer):
         customer = Customer.objects.create(user=user, **validated_data)
         customer.raw_password = password
         customer.save()
-        customer.refresh_from_db()
-
-        # Gán số điện thoại nếu có
-        if phone_count > 0:
-            available_phones = (
-                PhoneAccount.objects.filter(status="live", is_used=False)
-                .order_by("created_at")[:phone_count]
-            )
-            if available_phones.count() < phone_count:
-                raise serializers.ValidationError(
-                    {"phone_count": "Không đủ số điện thoại khả dụng (live & chưa dùng)."}
-                )
-            for phone in available_phones:
-                phone.customer = customer
-                phone.is_used = True
-                phone.save()
-            customer.phone_assigned_count += phone_count
-            customer.save()
 
         return customer
 
@@ -433,21 +422,6 @@ class CustomerSerializer(serializers.ModelSerializer):
         user.save()
         instance.save()
 
-        if phone_count > 0:
-            available_phones = (
-                PhoneAccount.objects.filter(status="live", is_used=False)
-                .order_by("created_at")[:phone_count]
-            )
-            if available_phones.count() < phone_count:
-                raise serializers.ValidationError(
-                    {"phone_count": "Không đủ số điện thoại khả dụng (live & chưa dùng)."}
-                )
-            for phone in available_phones:
-                phone.customer = instance
-                phone.is_used = True
-                phone.save()
-            instance.phone_assigned_count += phone_count
-            instance.save()
         return instance
 
     def get_plain_password(self, obj):
