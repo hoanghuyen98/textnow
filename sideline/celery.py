@@ -21,5 +21,3 @@ app.conf.beat_schedule = {
         "schedule": 1800,  # 600 giây = 10 phút
     },
 }
-
-CELERY_BEAT_SCHEDULE_FILENAME = None

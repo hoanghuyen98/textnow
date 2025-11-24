@@ -208,26 +208,68 @@ def run_curl(curl_text):
     except Exception:
         body = resp.text
 
-    if isinstance(body, dict) and "result" in body:
-        for item in body.get("result", []):
-            raw = item.get("body")
-            if not raw:
-                continue
+    logger.info(body)
 
-            try:
-                parsed = json.loads(raw)
-            except:
-                continue
+    # -------------------------------
+    # 1) Lỗi: body là string (VD: Bad credentials)
+    # -------------------------------
+    if isinstance(body, str):
+        return {
+            "status": "error",
+            "message": body.strip()
+        }
+    logger.info("check lỗi")
+    # -------------------------------
+    # 2) Validate định dạng Pinger tiêu chuẩn
+    # body phải có: success + result(list)
+    # -------------------------------
+    if not isinstance(body, dict):
+        return {"status": "error", "message": "Invalid response format (not dict)"}
 
-            # Nếu có lỗi → trả về error ngay
-            if "errNo" in parsed or "errMsg" in parsed:
+    if "success" not in body:
+        return {"status": "error", "message": "Missing 'success' in response"}
+
+    if "result" not in body:
+        return {"status": "error", "message": "Missing 'result' in response"}
+
+    if not isinstance(body["result"], list):
+        return {"status": "error", "message": "'result' must be a list"}
+
+    # Validate từng item trong result
+    for i, item in enumerate(body["result"]):
+        if not isinstance(item, dict):
+            return {"status": "error", "message": f"result[{i}] is not a dict"}
+
+        for key in ["httpResponseCode", "contentType", "body"]:
+            if key not in item:
                 return {
                     "status": "error",
-                    "message": parsed.get("errMsg", "Unknown error"),
-                    "code": parsed.get("errNo")
+                    "message": f"Missing '{key}' in result[{i}]"
                 }
 
-    # Nếu không lỗi → thành công
+    # -------------------------------
+    # 3) Kiểm tra lỗi cấp 2: errNo / errMsg trong từng body JSON
+    # -------------------------------
+    for item in body.get("result", []):
+        raw = item.get("body")
+        if not raw:
+            continue
+
+        try:
+            parsed = json.loads(raw)
+        except:
+            continue
+
+        if "errNo" in parsed or "errMsg" in parsed:
+            return {
+                "status": "error",
+                "message": parsed.get("errMsg", "Unknown error"),
+                "code": parsed.get("errNo")
+            }
+
+    # -------------------------------
+    # 4) Không lỗi → success
+    # -------------------------------
     return {
         "status": "success",
         "body": body

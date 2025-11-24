@@ -852,7 +852,8 @@ class CreatePhoneAccountView(APIView):
                 creator=employee,
                 purchased_mail=purchased_mail
             )
-            task = process_phoneaccount_background.delay(phone_obj.id)
+            print("phone_obj: ", phone_obj.name)
+            task = process_phoneaccount_background.delay(phone_obj.name)
 
             return Response({
                 "status": "success",
@@ -1996,11 +1997,16 @@ class BulkResetPasswordView(APIView):
 class TaskStatusView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
+    allowed_roles = ["staff", "admin"]
     throttle_scope = 'light'
 
     def get(self, request, task_id):
         result = AsyncResult(task_id)
+        print("status: ", result.status)
+        print("result: ", result.result)
+        print("traceback: ", result.traceback)
         print('task_id: ', task_id)
+
         if result.state == "PENDING":
             return Response({"status": "pending"})
 

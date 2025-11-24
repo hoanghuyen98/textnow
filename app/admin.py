@@ -13,6 +13,7 @@ class PhoneAccountAdmin(admin.ModelAdmin):
         "id",
         "phone",
         "name",
+        "batch",
         "creator_name",
         "customer_name",
         "mail",
@@ -39,6 +40,7 @@ class PhoneAccountAdmin(admin.ModelAdmin):
         "phone",
         "name",
         "mail",
+        "batch",
         "creator__user__username",
         "customer__user__username",
     )
