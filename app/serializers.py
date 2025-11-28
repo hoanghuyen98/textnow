@@ -326,7 +326,7 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
                 customer__isnull=False,
             )
             .select_related("customer", "customer__user")
-            .order_by("created_at")
+            .order_by("-created_at")
         )
 
         available_phones = list(available_phones_qs[: phone_count])

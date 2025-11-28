@@ -64,9 +64,12 @@ def fetch_categories(provider: str):
     if provider == "sellmmo":
         categories = data.get("categories") or []
 
+        # Các category cần lấy
+        allowed_category_ids = {"14", "57"}
+
         for cat in categories:
-            # Chỉ lấy category ID = 14 (Outlook - Hotmail)
-            if str(cat.get("id")) != "14":
+            # Nếu id không thuộc danh sách → bỏ qua
+            if str(cat.get("id")) not in allowed_category_ids:
                 continue
 
             for p in cat.get("products", []):
