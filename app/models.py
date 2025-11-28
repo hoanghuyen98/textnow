@@ -52,7 +52,9 @@ class CustomerAssignHistory(models.Model):
     phone_count = models.PositiveIntegerField()
     created_list = models.JSONField()   # Lưu list JSON
     created_at = models.DateTimeField(auto_now_add=True)
-
+    updated_at = models.DateTimeField(auto_now=True)
+    
+    reset_count = models.PositiveIntegerField(default=0)
     # Ai thực hiện cấp (admin/staff)
     creator = models.ForeignKey(
         User,

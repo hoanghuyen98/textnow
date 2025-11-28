@@ -589,24 +589,19 @@ class CustomerAssignHistoryLatestView(APIView):
     throttle_scope = "light"
 
     def get(self, request):
-        latest_obj = (
+        limit = int(request.GET.get("limit", 20))  # mặc định 20 bản ghi
+
+        queryset = (
             CustomerAssignHistory.objects
             .select_related("creator")
-            .order_by("-created_at")
-            .first()
+            .order_by("-created_at")[:limit]
         )
 
-        if not latest_obj:
-            return Response({
-                "status": "error",
-                "message": "Không có lịch sử cấp số."
-            }, status=404)
-
-        serializer = CustomerAssignHistorySerializer(latest_obj)
+        serializer = CustomerAssignHistorySerializer(queryset, many=True)
 
         return Response({
             "status": "success",
-            "message": "Lấy bản ghi lịch sử mới nhất thành công.",
+            "message": "Lấy danh sách lịch sử thành công.",
             "data": serializer.data
         })
 
@@ -1983,11 +1978,12 @@ class BulkResetPasswordView(APIView):
     throttle_scope = 'light'
 
     def post(self, request):
-        customer_ids = request.data.get("customer_ids", [])
-        if not customer_ids:
-            return Response({"status": "error", "message": "customer_ids required"}, status=400)
+        customer_names = request.data.get("customer_names", [])
+        history_id = request.data.get("history_id")
+        if not customer_names:
+            return Response({"status": "error", "message": "customer_names required"}, status=400)
 
-        task = bulk_reset_password_task.delay(customer_ids)
+        task = bulk_reset_password_task.delay(customer_names, history_id)
 
         return Response({
             "status": "success",

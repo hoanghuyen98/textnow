@@ -2,7 +2,7 @@ from celery import shared_task
 from django.db import transaction
 from django.utils import timezone
 import json
-from .models import PhoneAccount, Customer, MessageHistoryLog
+from .models import PhoneAccount, Customer, MessageHistoryLog, CustomerAssignHistory
 from .utils import run_curl
 from datetime import timedelta
 from logzero import logger
@@ -100,8 +100,8 @@ def check_celery():
     return {"result": "OK"}
 
 @shared_task()
-def bulk_reset_password_task(customer_ids):
-    customers = Customer.objects.select_related("user").filter(id__in=customer_ids)
+def bulk_reset_password_task(customer_names, history_id=None):
+    customers = Customer.objects.select_related("user").filter(user__username__in=customer_names)
     logger.info("task bulk_reset_password_task")
     if not customers.exists():
         return {"status": "error", "message": "No customers found"}
@@ -109,6 +109,13 @@ def bulk_reset_password_task(customer_ids):
     reset_data = []
     updated_users = []
     updated_customers = []
+    
+    history = None
+    if history_id:
+        try:
+            history = CustomerAssignHistory.objects.get(id=history_id)
+        except CustomerAssignHistory.DoesNotExist:
+            logger.warning(f"CustomerAssignHistory with id={history_id} not found")
 
     with transaction.atomic():
         for cus in customers:
@@ -127,6 +134,21 @@ def bulk_reset_password_task(customer_ids):
                 "username": cus.user.username,
                 "new_password": new_pass,
             })
+            
+        # Nếu có history, cập nhật created_list tương ứng
+        if history:
+            updated_list = []
+            for item in history.created_list:
+                if item.get("username") in customer_names:
+                    # Cập nhật password mới trong danh sách
+                    corresponding_cus = next((r for r in reset_data if r["username"] == item.get("username")), None)
+                    if corresponding_cus:
+                        item["password"] = corresponding_cus["new_password"]
+                updated_list.append(item)
+            history.created_list = updated_list
+            history.reset_count += 1  # tăng số lần reset
+            history.is_password_reset = True  # đánh dấu đã reset
+            history.save()
 
         User.objects.bulk_update(updated_users, ["password"])
         Customer.objects.bulk_update(updated_customers, ["raw_password"])
