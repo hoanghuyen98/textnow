@@ -218,7 +218,6 @@ def run_curl(curl_text):
             "status": "error",
             "message": body.strip()
         }
-    logger.info("check lỗi")
     # -------------------------------
     # 2) Validate định dạng Pinger tiêu chuẩn
     # body phải có: success + result(list)

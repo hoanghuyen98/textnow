@@ -105,13 +105,15 @@ CORS_ALLOWED_ORIGIN_REGEXES = [
 ]
 
 SIMPLE_JWT = {
-    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=200),
-    'REFRESH_TOKEN_LIFETIME': timedelta(days=3),
+    'ACCESS_TOKEN_LIFETIME': timedelta(minutes=5),
+    'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
 }
 
+logger.info(DEBUG)
 
 # --------- cau hinh luu log ----------------------
-if not DEBUG:
+if DEBUG == "False":
+
     LOG_DIR = "/var/log/sideline"
     LOG_FILE = os.path.join(LOG_DIR, "app.log")
 

@@ -12,6 +12,7 @@ from django.core.cache import cache
 import secrets
 from django.contrib.auth.hashers import make_password
 from .utils import run_curl_with_retry
+from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 import logging
 from celery import group
 
@@ -56,12 +57,6 @@ def check_single_phone(phone_id):
         if customer_created_time and customer_created_time < live_expired_time:
             phone.status = "lock"
             phone.save(update_fields=["status"])
-
-            logs.append({
-                "phone": phone.phone,
-                "status": "lock",
-                "message": "🔒 Locked (customer tạo > 72h)"
-            })
 
             logger.info(f"[{phone.phone}] 🔒 Locked: customer tạo > 72h")
 
@@ -134,7 +129,11 @@ def bulk_reset_password_task(customer_names, history_id=None):
                 "username": cus.user.username,
                 "new_password": new_pass,
             })
-            
+            tokens = OutstandingToken.objects.filter(user=user)
+            logger.info(tokens)
+            for token in tokens:
+                print("token: ", token)
+                BlacklistedToken.objects.get_or_create(token=token)
         # Nếu có history, cập nhật created_list tương ứng
         if history:
             updated_list = []

@@ -910,7 +910,6 @@ class RefreshInboxView(APIView):
 
         else:
             # --- Call cURL ---
-            print("ko vao dây")
             raw_result = run_curl(obj.batch)
             print('raw_result; ', raw_result)
             if raw_result.get("status") == "error":
