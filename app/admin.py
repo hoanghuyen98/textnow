@@ -257,10 +257,12 @@ class CustomerAssignHistoryAdmin(admin.ModelAdmin):
         "id",
         "phone_count",
         "creator",
+        "reset_count",
         "created_at",
+        "updated_at"
     )
 
-    readonly_fields = ("created_at",)
+    readonly_fields = ("created_at", "updated_at", )
 
     list_filter = (
         "creator",
