@@ -104,6 +104,7 @@ def bulk_reset_password_task(customer_names, history_id=None):
     reset_data = []
     updated_users = []
     updated_customers = []
+    blacklist_objects = []
     
     history = None
     if history_id:
@@ -130,27 +131,31 @@ def bulk_reset_password_task(customer_names, history_id=None):
                 "new_password": new_pass,
             })
             tokens = OutstandingToken.objects.filter(user=user)
-            logger.info(tokens)
-            for token in tokens:
-                print("token: ", token)
-                BlacklistedToken.objects.get_or_create(token=token)
-        # Nếu có history, cập nhật created_list tương ứng
-        if history:
-            updated_list = []
-            for item in history.created_list:
-                if item.get("username") in customer_names:
-                    # Cập nhật password mới trong danh sách
-                    corresponding_cus = next((r for r in reset_data if r["username"] == item.get("username")), None)
-                    if corresponding_cus:
-                        item["password"] = corresponding_cus["new_password"]
-                updated_list.append(item)
-            history.created_list = updated_list
-            history.reset_count += 1  # tăng số lần reset
-            history.is_password_reset = True  # đánh dấu đã reset
-            history.save()
-
+            blacklist_objects.extend([
+                BlacklistedToken(token=t) for t in tokens
+            ])
+        
+        # Bulk update database
         User.objects.bulk_update(updated_users, ["password"])
         Customer.objects.bulk_update(updated_customers, ["raw_password"])
+
+        # Bulk create blacklisted tokens (fast)
+        BlacklistedToken.objects.bulk_create(
+            blacklist_objects, ignore_conflicts=True
+        )
+            
+        # Nếu có history, cập nhật created_list tương ứng
+        if history:
+            updated_list = history.created_list.copy()
+            for item in updated_list:
+                for row in reset_data:
+                    if item.get("username") == row["username"]:
+                        item["password"] = row["new_password"]
+
+            history.created_list = updated_list
+            history.reset_count += 1
+            history.is_password_reset = True
+            history.save()
 
     return {
         "status": "success",
