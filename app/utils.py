@@ -6,7 +6,7 @@ import subprocess
 import os
 
 PROXY_US = os.environ.get('PROXY_US')
-
+logger.info(PROXY_US)
 try:
     import curlconverter
     HAS_CONVERTER = True
@@ -179,7 +179,8 @@ def run_curl(curl_text):
         "http": PROXY_US,
         "https": PROXY_US,
     }
-
+    logger.info('-----------------')
+    logger.info(proxy)
     h, d = p["headers"], p["data"]
 
     try:
@@ -207,8 +208,6 @@ def run_curl(curl_text):
         body = resp.json()
     except Exception:
         body = resp.text
-
-    logger.info(body)
 
     # -------------------------------
     # 1) Lỗi: body là string (VD: Bad credentials)

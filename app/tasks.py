@@ -10,6 +10,7 @@ import random, string
 from django.contrib.auth.models import User
 from django.core.cache import cache
 import secrets
+import time
 from django.contrib.auth.hashers import make_password
 from .utils import run_curl_with_retry
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
@@ -21,13 +22,14 @@ task_logger = logging.getLogger("task_error")
 
 @shared_task
 def check_single_phone(phone_id):
+    time.sleep(5)
     phone = PhoneAccount.objects.get(id=phone_id)
 
     curl_text = phone.batch
     result = run_curl(curl_text)
 
     now = timezone.now()
-    live_expired_time = now - timedelta(days=7)
+    live_expired_time = now - timedelta(days=3)
     msg = ""
 
     if result["status"] != "success":

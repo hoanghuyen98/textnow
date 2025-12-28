@@ -95,10 +95,12 @@ ROOT_URLCONF = 'sideline.urls'
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # frontend dev
     "http://38.145.199.150",
-    "https://sideliine.com"
+    "http://38.145.199.151",
+    "https://sideliine.com",
+    "https://messages-textfree.com"
 ]
 
-CSRF_TRUSTED_ORIGINS = ["http://38.145.199.150", "http://localhost:5173", "https://sideliine.com"]
+CSRF_TRUSTED_ORIGINS = ["http://38.145.199.151", "http://localhost:5173", "https://sideliine.com", "https://messages-textfree.com"]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.ngrok-free\.dev$",
