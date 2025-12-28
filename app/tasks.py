@@ -27,7 +27,7 @@ def check_single_phone(phone_id):
     result = run_curl(curl_text)
 
     now = timezone.now()
-    live_expired_time = now - timedelta(days=7)
+    live_expired_time = now - timedelta(days=3)
     msg = ""
 
     if result["status"] != "success":
