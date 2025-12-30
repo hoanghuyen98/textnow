@@ -63,6 +63,7 @@ class CustomerAssignHistory(models.Model):
         blank=True,
         related_name="assign_histories"
     )
+    is_revoke = models.BooleanField(default=False)
 
     class Meta:
         db_table = "customer_assign_history"

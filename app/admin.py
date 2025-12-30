@@ -258,6 +258,7 @@ class CustomerAssignHistoryAdmin(admin.ModelAdmin):
         "phone_count",
         "creator",
         "reset_count",
+        "is_revoke",
         "created_at",
         "updated_at"
     )
@@ -265,7 +266,7 @@ class CustomerAssignHistoryAdmin(admin.ModelAdmin):
     readonly_fields = ("created_at", "updated_at", )
 
     list_filter = (
-        "creator",
+        "is_revoke",
         ("created_at", DateFieldListFilter),
     )
 

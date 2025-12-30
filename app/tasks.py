@@ -106,6 +106,7 @@ def bulk_reset_password_task(customer_names, history_id=None):
     reset_data = []
     updated_users = []
     updated_customers = []
+    blacklist_objects = []
     
     history = None
     if history_id:
@@ -132,27 +133,31 @@ def bulk_reset_password_task(customer_names, history_id=None):
                 "new_password": new_pass,
             })
             tokens = OutstandingToken.objects.filter(user=user)
-            logger.info(tokens)
-            for token in tokens:
-                print("token: ", token)
-                BlacklistedToken.objects.get_or_create(token=token)
-        # Nếu có history, cập nhật created_list tương ứng
-        if history:
-            updated_list = []
-            for item in history.created_list:
-                if item.get("username") in customer_names:
-                    # Cập nhật password mới trong danh sách
-                    corresponding_cus = next((r for r in reset_data if r["username"] == item.get("username")), None)
-                    if corresponding_cus:
-                        item["password"] = corresponding_cus["new_password"]
-                updated_list.append(item)
-            history.created_list = updated_list
-            history.reset_count += 1  # tăng số lần reset
-            history.is_password_reset = True  # đánh dấu đã reset
-            history.save()
-
+            blacklist_objects.extend([
+                BlacklistedToken(token=t) for t in tokens
+            ])
+        
+        # Bulk update database
         User.objects.bulk_update(updated_users, ["password"])
         Customer.objects.bulk_update(updated_customers, ["raw_password"])
+
+        # Bulk create blacklisted tokens (fast)
+        BlacklistedToken.objects.bulk_create(
+            blacklist_objects, ignore_conflicts=True
+        )
+            
+        # Nếu có history, cập nhật created_list tương ứng
+        if history:
+            updated_list = history.created_list.copy()
+            for item in updated_list:
+                for row in reset_data:
+                    if item.get("username") == row["username"]:
+                        item["password"] = row["new_password"]
+
+            history.created_list = updated_list
+            history.reset_count += 1
+            history.is_password_reset = True
+            history.save()
 
     return {
         "status": "success",
@@ -200,7 +205,60 @@ def process_phoneaccount_background(phone_name):
 
     except Exception as e:
         import traceback
-        logger.error(f"[{self.request.id}] Task FAILED: {e}")
+        logger.error(f"Task FAILED: {e}")
         logger.error(traceback.format_exc())
-        raise e
         return {"status": "error", "message": "Có lỗi xảy ra trong quá trình tạo phone, vui lòng tạo lại"}
+
+
+@shared_task(bind=True)
+def revoke_phone_account_task(self, customer_names: list, history_id=None):
+    customers = Customer.objects.select_related("user").filter(user__username__in=customer_names)
+    logger.info("task revoke_phone_account_task")
+    logger.info("task thu hoi account")
+    if not customers.exists():
+        return {"status": "error", "message": "No customers found"}
+
+    history = None
+    if history_id:
+        try:
+            history = CustomerAssignHistory.objects.get(id=history_id)
+            history.is_revoke = True
+            history.save()
+        except CustomerAssignHistory.DoesNotExist:
+            logger.warning(f"CustomerAssignHistory with id={history_id} not found")
+
+    # task_ids = []
+    logger.info(f"customer_names: {customer_names}")
+    for customer_name in customer_names:
+        logger.info(f"customer_name: {customer_name}")
+        phone = PhoneAccount.objects.select_related(
+            "customer__user"
+        ).get(name=customer_name)
+        logger.info(f"phone: {phone}")
+        customer = phone.customer
+        if not customer:
+            logger.info(f"[{phone.phone}] ❗ Không có customer — bỏ qua")
+            return None
+
+        new_pass = secrets.token_hex(5)
+        hashed = make_password(new_pass)
+
+        user = customer.user
+        user.password = hashed
+        user.save(update_fields=["password"])
+
+        customer.raw_password = new_pass
+        customer.date_use = None
+        customer.save(update_fields=["raw_password", "date_use"])
+
+        tokens = OutstandingToken.objects.filter(user=user)
+        BlacklistedToken.objects.bulk_create(
+            [BlacklistedToken(token=t) for t in tokens],
+            ignore_conflicts=True
+        )
+
+        phone.is_used = False
+        phone.save(update_fields=["is_used"])
+
+
+    return {"status": "success"}

@@ -35,6 +35,7 @@ urlpatterns = [
     path('customer_info/',views.CustomerInfoView.as_view(), name='customer_info'),
     path('auto_create_customers/',views.AutoCreateCustomerView.as_view(), name='auto_create_customers'),
     path('reset_password/', views.BulkResetPasswordView.as_view(), name='reset_password'),
+    path('revoke_phoneaccount/', views.RevokePhoneAccountView.as_view(), name='revoke_phoneaccount'),
     path("task_status/<str:task_id>/", views.TaskStatusView.as_view()),
 
     # login/logout

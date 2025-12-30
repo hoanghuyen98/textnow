@@ -32,7 +32,7 @@ from functools import wraps
 from drf_yasg.utils import swagger_auto_schema
 from django.db import transaction
 from datetime import datetime, date
-from .tasks import check_phone_all_batches, bulk_reset_password_task, check_celery, process_phoneaccount_background
+from .tasks import check_phone_all_batches, bulk_reset_password_task, check_celery, process_phoneaccount_background, revoke_phone_account_task
 from rest_framework.throttling import ScopedRateThrottle
 from drf_yasg import openapi
 from .response_messages import PHONE_MESSAGES, INBOX_MESSAGES, SEND_MESSAGE_MESSAGES, SEND_MEDIA_MESSAGES
@@ -1298,7 +1298,6 @@ class BuyMailView(APIView):
             elif provider == "muaview":
                 print("------------------------")
                 result = buy_mail_muaview(employee=user, service_id=product_id, quality=quality)
-                print("---------------fdsklfjdslkfjdslkfjdslk")
                 print(result)
                 logger.info(f"dd: {result}")
             else:
@@ -2003,7 +2002,28 @@ class BulkResetPasswordView(APIView):
             "status": "success",
             "task_id": task.id
         })
+    
+
+class RevokePhoneAccountView(APIView):
+    permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
+    allowed_roles = ["admin"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'light'
+
+    def post(self, request):
+        customer_names = request.data.get("customer_names", [])
+        history_id = request.data.get("history_id")
+        if not customer_names:
+            return Response({"status": "error", "message": "customer_names required"}, status=400)
+
+        task = revoke_phone_account_task.delay(customer_names, history_id)
+
+        return Response({
+            "status": "success",
+            "task_id": task.id
+        })
         
+
 class TaskStatusView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]
