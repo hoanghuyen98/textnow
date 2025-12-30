@@ -27,12 +27,12 @@ from rest_framework.views import APIView
 from django.db import IntegrityError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
-from .service import fetch_categories, buy_mail_dongvan, buy_mail_sellmmo, get_auth_code
+from .service import fetch_categories, buy_mail_dongvan, buy_mail_sellmmo, get_auth_code, buy_mail_muaview
 from functools import wraps
 from drf_yasg.utils import swagger_auto_schema
 from django.db import transaction
 from datetime import datetime, date
-from .tasks import check_phone_all_batches, bulk_reset_password_task, check_celery, process_phoneaccount_background
+from .tasks import check_phone_all_batches, bulk_reset_password_task, check_celery, process_phoneaccount_background, revoke_phone_account_task
 from rest_framework.throttling import ScopedRateThrottle
 from drf_yasg import openapi
 from .response_messages import PHONE_MESSAGES, INBOX_MESSAGES, SEND_MESSAGE_MESSAGES, SEND_MEDIA_MESSAGES
@@ -899,14 +899,22 @@ class RefreshInboxView(APIView):
             print("so dien thoai die roi:(())")
             redis_key = f"message_history:{obj.phone}"
             raw = cache.get(redis_key)
-            raw_result = json.loads(raw)
-            print('raw_result: ', raw_result)
-            if not raw_result:
+
+            if not raw:
                 return Response(
                     {"status": "error", "message": "Không có lịch sử trong cache"},
                     status=status.HTTP_404_NOT_FOUND
                 )
-            # raw_result = json.loads(raw)
+
+            try:
+                raw_result = json.loads(raw)
+            except Exception:
+                return Response(
+                    {"status": "error", "message": "Lịch sử bị lỗi hoặc không đúng định dạng JSON"},
+                    status=status.HTTP_400_BAD_REQUEST
+                )
+
+            print('raw_result:', raw_result)
 
         else:
             # --- Call cURL ---
@@ -1287,7 +1295,11 @@ class BuyMailView(APIView):
                 logger.info(f'result: {result}')
             elif provider == "dongvan":
                 result = buy_mail_dongvan(employee=user, account_type=product_id, quality=quality)
-
+            elif provider == "muaview":
+                print("------------------------")
+                result = buy_mail_muaview(employee=user, service_id=product_id, quality=quality)
+                print(result)
+                logger.info(f"dd: {result}")
             else:
                 return Response(
                     {"status": "error", "message": f"Provider '{provider}' không được hỗ trợ."},
@@ -1346,9 +1358,11 @@ class GetAuthCodeView(APIView):
 
         try:
             result = get_auth_code(
-                email=mail_obj.email,
-                refresh_token=mail_obj.refresh_token,
-                client_id=mail_obj.client_id
+                email = mail_obj.email,
+                refresh_token = mail_obj.refresh_token,
+                client_id = mail_obj.client_id,
+                provider = mail_obj.provider
+
             )
         except Exception as e:
             logger.error( f"Lỗi khi gọi get_auth_code: {str(e)}")
@@ -1988,7 +2002,28 @@ class BulkResetPasswordView(APIView):
             "status": "success",
             "task_id": task.id
         })
+    
+
+class RevokePhoneAccountView(APIView):
+    permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
+    allowed_roles = ["admin"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'light'
+
+    def post(self, request):
+        customer_names = request.data.get("customer_names", [])
+        history_id = request.data.get("history_id")
+        if not customer_names:
+            return Response({"status": "error", "message": "customer_names required"}, status=400)
+
+        task = revoke_phone_account_task.delay(customer_names, history_id)
+
+        return Response({
+            "status": "success",
+            "task_id": task.id
+        })
         
+
 class TaskStatusView(APIView):
     permission_classes = [permissions.IsAuthenticated]
     throttle_classes = [ScopedRateThrottle]

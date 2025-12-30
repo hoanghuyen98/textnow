@@ -294,6 +294,7 @@ class CustomerAssignHistorySerializer(serializers.ModelSerializer):
             "created_at",
             "creator",
             "creator_username",
+            "is_revoke",
         ]
 
 

@@ -203,7 +203,60 @@ def process_phoneaccount_background(phone_name):
 
     except Exception as e:
         import traceback
-        logger.error(f"[{self.request.id}] Task FAILED: {e}")
+        logger.error(f"Task FAILED: {e}")
         logger.error(traceback.format_exc())
-        raise e
         return {"status": "error", "message": "Có lỗi xảy ra trong quá trình tạo phone, vui lòng tạo lại"}
+
+
+@shared_task(bind=True)
+def revoke_phone_account_task(self, customer_names: list, history_id=None):
+    customers = Customer.objects.select_related("user").filter(user__username__in=customer_names)
+    logger.info("task revoke_phone_account_task")
+    logger.info("task thu hoi account")
+    if not customers.exists():
+        return {"status": "error", "message": "No customers found"}
+
+    history = None
+    if history_id:
+        try:
+            history = CustomerAssignHistory.objects.get(id=history_id)
+            history.is_revoke = True
+            history.save()
+        except CustomerAssignHistory.DoesNotExist:
+            logger.warning(f"CustomerAssignHistory with id={history_id} not found")
+
+    # task_ids = []
+    logger.info(f"customer_names: {customer_names}")
+    for customer_name in customer_names:
+        logger.info(f"customer_name: {customer_name}")
+        phone = PhoneAccount.objects.select_related(
+            "customer__user"
+        ).get(name=customer_name)
+        logger.info(f"phone: {phone}")
+        customer = phone.customer
+        if not customer:
+            logger.info(f"[{phone.phone}] ❗ Không có customer — bỏ qua")
+            return None
+
+        new_pass = secrets.token_hex(5)
+        hashed = make_password(new_pass)
+
+        user = customer.user
+        user.password = hashed
+        user.save(update_fields=["password"])
+
+        customer.raw_password = new_pass
+        customer.date_use = None
+        customer.save(update_fields=["raw_password", "date_use"])
+
+        tokens = OutstandingToken.objects.filter(user=user)
+        BlacklistedToken.objects.bulk_create(
+            [BlacklistedToken(token=t) for t in tokens],
+            ignore_conflicts=True
+        )
+
+        phone.is_used = False
+        phone.save(update_fields=["is_used"])
+
+
+    return {"status": "success"}
