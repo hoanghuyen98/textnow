@@ -4,6 +4,7 @@ from .models import MailProvider, MailTransaction, PurchasedMail
 from dotenv import load_dotenv
 from logzero import logger
 import re
+import time
 from bs4 import BeautifulSoup
 from django.db.models import Q
 import os
@@ -13,6 +14,7 @@ load_dotenv()
 SELLMMO_KEY = os.environ.get('SELLMMO_KEY')
 DONGVAN_KEY = os.environ.get('DONGVAN_KEY')
 MUAVIEW_KEY = os.environ.get('MUAVIEW_KEY')
+SHOPGMAIL_KEY = os.environ.get('SHOPGMAIL_KEY')
 
 API_CONFIG = {
     "sellmmo": {
@@ -42,6 +44,24 @@ API_CONFIG = {
             "otp": "/api/thuemailao/CheckOtpOrder",
         }
     },
+    "muaview_that": {
+        "base_url": "https://muaview.vn",
+        "key": MUAVIEW_KEY,  
+        "endpoints": {
+            "categories": "/api/ApiV2/GetListServices",
+            "buy": "/api/ApiV2/CreateOrder",
+            "otp": "/api/ApiV2/CheckOtp",
+        }
+    },
+    "shopgmail": {
+        "base_url": "https://api.shopgmail9999.com",
+        "key": SHOPGMAIL_KEY,  
+        "endpoints": {
+            "categories": "/api/ApiV2/GetListServices",
+            "buy": "/api/ApiV2/CreateOrder",
+            "otp": "/api/ApiV2/CheckOtp",
+        }
+    },
 }
 
 
@@ -66,7 +86,10 @@ def fetch_categories(provider: str):
         params["apikey"] = conf["key"]
     elif provider == "muaview":
         params["apikey"] = conf["key"]
-
+    elif provider == "muaview_that":
+        params["apikey"] = conf["key"]
+    elif provider == "shopgmail":
+        params["apikey"] = conf["key"]
 
     try:
         resp = requests.get(url, params=params, timeout=10)
@@ -120,6 +143,7 @@ def fetch_categories(provider: str):
 
     elif provider == "muaview":
         items = data.get("data") or []
+        print("items: ", items)
         result.extend([
             {
                 "id": int(item["id"]),
@@ -127,6 +151,32 @@ def fetch_categories(provider: str):
                 "price": item["price"],
             }
             for item in items
+        ])
+
+    elif provider == "muaview_that":
+        items = data.get("data") or []
+        allowed_ids = {64}
+        result.extend([
+            {
+                "id": int(item["id"]),
+                "name": f"{item['name']} ({item['price']})",
+                "price": item["price"],
+            }
+            for item in items
+            if int(item.get("id", -1)) in allowed_ids
+        ])
+
+    elif provider == "shopgmail":
+        items = data.get("data") or []
+        allowed_ids = {155}
+        result.extend([
+            {
+                "id": int(item["id"]),
+                "name": f"{item['name']} ({item['price']})",
+                "price": item["price"],
+            }
+            for item in items
+            if int(item.get("id", -1)) in allowed_ids
         ])
 
     return {"status": "success", "provider": provider, "count": len(result), "data": result}
@@ -247,7 +297,156 @@ def buy_mail_muaview(employee, service_id: int, quality: int = 1):
         logger.info(mail)
         mails.append(mail)
         order_ids.append(result.get("order_id"))
+        time.sleep(1)
+        
+    # -------- SAVE TO DATABASE --------
+    provider_obj, _ = MailProvider.objects.get_or_create(
+        name=provider,
+        defaults={"base_url": conf["base_url"], "api_key": conf["key"]},
+    )
 
+    purchase = MailTransaction.objects.create(
+        provider=provider_obj,
+        employee=employee,
+        product_id=str(service_id),
+        product_name=result.get("service_name", f"Service {service_id}"),
+        quantity=len(mails),
+        total_price=None,     # nếu API trả giá thì update vào đây
+        trans_id=",".join(map(str, order_ids)),
+        status="success",
+        raw_response={"orders": mails},
+    )
+
+    # insert từng mail
+    for m in mails:
+        PurchasedMail.objects.create(
+            purchase=purchase,
+            email=m.get("email"),
+            password=m.get("password"),
+            refresh_token=m.get("refresh_token", ""),
+            client_id=m.get("client_id", ""),
+            provider=m.get("provider", provider),
+            is_used=False
+        )
+    logger.info(mails)
+    print("-------------")
+    return {
+        "status": "success",
+        "message": f"Đã mua {len(mails)} email(s).",
+        "mails": mails
+    }
+
+def buy_mail_muaview_that(employee, service_id, quality: int = 1):
+    provider = "muaview_that"
+    conf = API_CONFIG[provider]
+    url = conf["base_url"] + conf["endpoints"]["buy"]
+
+    mails = []
+    order_ids = []
+    logger.info(f"service_id: {service_id}")
+    # Lặp từng lần tạo order vì API chỉ trả về 1 mail/order
+    for i in range(quality):
+        print("------------i: ", i)
+        params = {
+            "apikey": conf["key"],
+            "service": service_id
+        }
+
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            data = resp.json()
+            logger.info(f"[Muaview][Buy][{i+1}/{quality}] response: {data}")
+        except Exception as e:
+            logger.error(f"Lỗi khi gọi API Muaview: {e}")
+            return {"status": "error", "message": "Lỗi hệ thống khi mua mail"}
+
+        result = data.get("data", {})
+    
+        mail = {
+            "email": result.get("email"),
+            "password": "",
+            "refresh_token": "",
+            "client_id": result.get("order_id"),
+            "provider": provider,
+        }
+        logger.info(mail)
+        mails.append(mail)
+        order_ids.append(result.get("order_id"))
+        time.sleep(1)
+    # -------- SAVE TO DATABASE --------
+    provider_obj, _ = MailProvider.objects.get_or_create(
+        name=provider,
+        defaults={"base_url": conf["base_url"], "api_key": conf["key"]},
+    )
+
+    purchase = MailTransaction.objects.create(
+        provider=provider_obj,
+        employee=employee,
+        product_id=str(service_id),
+        product_name=result.get("service_name", f"Service {service_id}"),
+        quantity=len(mails),
+        total_price=None,     # nếu API trả giá thì update vào đây
+        trans_id=",".join(map(str, order_ids)),
+        status="success",
+        raw_response={"orders": mails},
+    )
+
+    # insert từng mail
+    for m in mails:
+        PurchasedMail.objects.create(
+            purchase=purchase,
+            email=m.get("email"),
+            password=m.get("password"),
+            refresh_token=m.get("refresh_token", ""),
+            client_id=m.get("client_id", ""),
+            provider=m.get("provider", provider),
+            is_used=False
+        )
+    logger.info(mails)
+    print("-------------")
+    return {
+        "status": "success",
+        "message": f"Đã mua {len(mails)} email(s).",
+        "mails": mails
+    }
+
+def buy_mail_shopgmail(employee, service_id, quality: int = 1):
+    provider = "shopgmail"
+    conf = API_CONFIG[provider]
+    url = conf["base_url"] + conf["endpoints"]["buy"]
+
+    mails = []
+    order_ids = []
+    logger.info(f"service_id: {service_id}")
+    # Lặp từng lần tạo order vì API chỉ trả về 1 mail/order
+    for i in range(quality):
+
+        params = {
+            "apikey": conf["key"],
+            "service": service_id
+        }
+
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            data = resp.json()
+            logger.info(f"[shopgmail][Buy][{i+1}/{quality}] response: {data}")
+        except Exception as e:
+            logger.error(f"Lỗi khi gọi API shopgmail: {e}")
+            return {"status": "error", "message": "Lỗi hệ thống khi mua mail"}
+
+        result = data.get("data", {})
+    
+        mail = {
+            "email": result.get("email"),
+            "password": "",
+            "refresh_token": "",
+            "client_id": result.get("orderid"),
+            "provider": provider,
+        }
+        logger.info(mail)
+        mails.append(mail)
+        order_ids.append(result.get("orderid"))
+        time.sleep(1)
     # -------- SAVE TO DATABASE --------
     provider_obj, _ = MailProvider.objects.get_or_create(
         name=provider,
@@ -390,15 +589,67 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
             logger.error(f"Muaview OTP error: {e}")
             return {"status": "error", "message": "Không kết nối được Muaview"}
 
-        if not data.get("success"):
-            return {"status": "error", "message": data.get("message", "Lỗi OTP Muaview")}
-
         result = data.get("data", {}) or {}
         otp = result.get("otp")
 
         return {
             "status": "success" if otp else "pending",
             "provider": "muaview",
+            "email": result.get("email") or email,
+            "auth_code": otp or "",
+            "from": "",
+            "subject": "",
+            "date": "",
+        }
+
+    if provider == "muaview_that":
+        url = API_CONFIG["muaview_that"]["base_url"] + API_CONFIG["muaview_that"]["endpoints"]["otp"]
+        params = {
+            "apikey": API_CONFIG["muaview_that"]["key"],
+            "order_id": client_id,   # client_id chính là order_id
+        }
+        logger.info(f"client_id: {client_id}")
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            data = resp.json()
+        except Exception as e:
+            logger.error(f"muaview_that OTP error: {e}")
+            return {"status": "error", "message": "Không kết nối được muaview_that"}
+
+        result = data.get("data", {}) or {}
+        otp = result.get("otp")
+
+        return {
+            "status": "success" if otp else "pending",
+            "provider": "muaview_that",
+            "email": result.get("email") or email,
+            "auth_code": otp or "",
+            "from": "",
+            "subject": "",
+            "date": "",
+        }
+
+    # =============== SHOPGMAIL (client_id = order_id) =================
+    if provider == "shopgmail":
+        url = API_CONFIG["shopgmail"]["base_url"] + API_CONFIG["shopgmail"]["endpoints"]["otp"]
+        params = {
+            "apikey": API_CONFIG["shopgmail"]["key"],
+            "orderid": client_id,   # client_id chính là order_id
+        }
+        logger.info(f"client_id: {client_id}")
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            data = resp.json()
+            print("data: ", data)
+        except Exception as e:
+            logger.error(f"shopgmail OTP error: {e}")
+            return {"status": "error", "message": "Không kết nối được shopgmail"}
+
+        result = data.get("data", {}) or {}
+        otp = result.get("otp")
+        return {
+            "status": "success" if otp else "pending",
+            "provider": "shopgmail",
             "email": result.get("email") or email,
             "auth_code": otp or "",
             "from": "",
@@ -427,12 +678,6 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
     except Exception as e:
         logger.error(f"Lỗi OTP {provider}: {e}")
         return {"status": "error", "message": f"Lỗi hệ thống khi gọi OTP {provider}."}
-
-    if not data or not data.get("status"):
-        return {
-            "status": "error",
-            "message": data.get("message", "Không thể lấy dữ liệu hợp lệ từ OTP API."),
-        }
 
     messages = data.get("messages", []) or []
     if not messages:

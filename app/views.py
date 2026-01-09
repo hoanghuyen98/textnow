@@ -27,7 +27,7 @@ from rest_framework.views import APIView
 from django.db import IntegrityError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
-from .service import fetch_categories, buy_mail_dongvan, buy_mail_sellmmo, get_auth_code, buy_mail_muaview
+from .service import fetch_categories, buy_mail_dongvan, buy_mail_sellmmo, get_auth_code, buy_mail_muaview, buy_mail_shopgmail, buy_mail_muaview_that
 from functools import wraps
 from drf_yasg.utils import swagger_auto_schema
 from django.db import transaction
@@ -1271,12 +1271,16 @@ class BuyMailView(APIView):
     def post(self, request):
         user = getattr(request.user, "employee_profile", None)
         provider = request.data.get("provider", "").lower().strip()
+        print("provider: ", provider)
         logger.info(f"provider: {provider}")
         if not provider:
             return Response(
                 {"status": "error", "message": "Thiếu provider."},
                 status=status.HTTP_400_BAD_REQUEST
             )
+        
+        product_name = request.data.get("product_name", "").split("(")[0].strip()
+        print('product_name: ', product_name)
 
         product_id = request.data.get("product_id")
         if not product_id:
@@ -1298,6 +1302,16 @@ class BuyMailView(APIView):
             elif provider == "muaview":
                 print("------------------------")
                 result = buy_mail_muaview(employee=user, service_id=product_id, quality=quality)
+                print(result)
+                logger.info(f"dd: {result}")
+            elif provider == "muaview_that":
+                print("------------------------")
+                result = buy_mail_muaview_that(employee=user, service_id=product_name, quality=quality)
+                print(result)
+                logger.info(f"dd: {result}")
+            elif provider == "shopgmail":
+                print("------------------------")
+                result = buy_mail_shopgmail(employee=user, service_id=product_name, quality=quality)
                 print(result)
                 logger.info(f"dd: {result}")
             else:
