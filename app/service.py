@@ -366,12 +366,12 @@ def buy_mail_muaview_that(employee, service_id, quality: int = 1):
             "email": result.get("email"),
             "password": "",
             "refresh_token": "",
-            "client_id": result.get("order_id"),
+            "client_id": result.get("orderid"),
             "provider": provider,
         }
         logger.info(mail)
         mails.append(mail)
-        order_ids.append(result.get("order_id"))
+        order_ids.append(result.get("orderid"))
         time.sleep(1)
     # -------- SAVE TO DATABASE --------
     provider_obj, _ = MailProvider.objects.get_or_create(
