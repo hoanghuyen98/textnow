@@ -264,11 +264,14 @@ def buy_mail_muaview(employee, service_id: int, quality: int = 1):
     url = conf["base_url"] + conf["endpoints"]["buy"]
 
     mails = []
-    order_ids = []
     logger.info(f"service_id: {service_id}")
-    # Lặp từng lần tạo order vì API chỉ trả về 1 mail/order
-    for i in range(quality):
 
+    provider_obj, _ = MailProvider.objects.get_or_create(
+        name=provider,
+        defaults={"base_url": conf["base_url"], "api_key": conf["key"]},
+    )
+
+    for i in range(quality):
         params = {
             "apikey": conf["key"],
             "service_id": service_id
@@ -280,61 +283,63 @@ def buy_mail_muaview(employee, service_id: int, quality: int = 1):
             logger.info(f"[Muaview][Buy][{i+1}/{quality}] response: {data}")
         except Exception as e:
             logger.error(f"Lỗi khi gọi API Muaview: {e}")
-            return {"status": "error", "message": "Lỗi hệ thống khi mua mail"}
+            continue
 
         if not data.get("success"):
-            return {"status": "error", "message": data.get("message", "Lỗi không xác định")}
+            logger.error(f"[Muaview] API error: {data}")
+            continue
 
         result = data.get("data", {})
-    
-        mail = {
-            "email": result.get("email"),
-            "password": "",
-            "refresh_token": "",
-            "client_id": result.get("order_id"),
-            "provider": provider,
-        }
-        logger.info(mail)
-        mails.append(mail)
-        order_ids.append(result.get("order_id"))
-        time.sleep(1)
-        
-    # -------- SAVE TO DATABASE --------
-    provider_obj, _ = MailProvider.objects.get_or_create(
-        name=provider,
-        defaults={"base_url": conf["base_url"], "api_key": conf["key"]},
-    )
+        order_id = result.get("order_id")
+        email = result.get("email")
 
-    purchase = MailTransaction.objects.create(
-        provider=provider_obj,
-        employee=employee,
-        product_id=str(service_id),
-        product_name=result.get("service_name", f"Service {service_id}"),
-        quantity=len(mails),
-        total_price=None,     # nếu API trả giá thì update vào đây
-        trans_id=",".join(map(str, order_ids)),
-        status="success",
-        raw_response={"orders": mails},
-    )
+        if not order_id or not email:
+            logger.error(f"[Muaview] response thiếu dữ liệu: {result}")
+            continue
 
-    # insert từng mail
-    for m in mails:
+        # -------- 1️⃣ SAVE TRANSACTION --------
+        purchase = MailTransaction.objects.create(
+            provider=provider_obj,
+            employee=employee,
+            product_id=str(service_id),
+            product_name=result.get("service_name", f"Service {service_id}"),
+            quantity=1,
+            total_price=None,
+            trans_id=order_id,      # ❗ 1 order = 1 transaction
+            status="success",
+            raw_response=result,
+        )
+
+        # -------- 2️⃣ SAVE PURCHASED MAIL --------
         PurchasedMail.objects.create(
             purchase=purchase,
-            email=m.get("email"),
-            password=m.get("password"),
-            refresh_token=m.get("refresh_token", ""),
-            client_id=m.get("client_id", ""),
-            provider=m.get("provider", provider),
+            email=email,
+            password="",
+            refresh_token="",
+            client_id=order_id,
+            provider=provider,
             is_used=False
         )
-    logger.info(mails)
-    print("-------------")
+
+        mail = {
+            "email": email,
+            "password": "",
+            "refresh_token": "",
+            "client_id": order_id,
+            "provider": provider,
+        }
+
+        mails.append(mail)
+        logger.info(f"[Muaview] saved mail: {email}")
+
+        time.sleep(1)
+
     return {
-        "status": "success",
+        "status": "success" if mails else "error",
         "message": f"Đã mua {len(mails)} email(s).",
         "mails": mails
     }
+
 
 def buy_mail_muaview_that(employee, service_id, quality: int = 1):
     provider = "muaview_that"
@@ -342,11 +347,17 @@ def buy_mail_muaview_that(employee, service_id, quality: int = 1):
     url = conf["base_url"] + conf["endpoints"]["buy"]
 
     mails = []
-    order_ids = []
+
     logger.info(f"service_id: {service_id}")
-    # Lặp từng lần tạo order vì API chỉ trả về 1 mail/order
+
+    provider_obj, _ = MailProvider.objects.get_or_create(
+        name=provider,
+        defaults={"base_url": conf["base_url"], "api_key": conf["key"]},
+    )
+
     for i in range(quality):
         print("------------i: ", i)
+
         params = {
             "apikey": conf["key"],
             "service": service_id
@@ -358,54 +369,55 @@ def buy_mail_muaview_that(employee, service_id, quality: int = 1):
             logger.info(f"[Muaview][Buy][{i+1}/{quality}] response: {data}")
         except Exception as e:
             logger.error(f"Lỗi khi gọi API Muaview: {e}")
-            return {"status": "error", "message": "Lỗi hệ thống khi mua mail"}
+            continue
 
         result = data.get("data", {})
-    
-        mail = {
-            "email": result.get("email"),
-            "password": "",
-            "refresh_token": "",
-            "client_id": result.get("orderid"),
-            "provider": provider,
-        }
-        logger.info(mail)
-        mails.append(mail)
-        order_ids.append(result.get("orderid"))
-        time.sleep(1)
-    # -------- SAVE TO DATABASE --------
-    provider_obj, _ = MailProvider.objects.get_or_create(
-        name=provider,
-        defaults={"base_url": conf["base_url"], "api_key": conf["key"]},
-    )
+        order_id = result.get("orderid")
+        email = result.get("email")
 
-    purchase = MailTransaction.objects.create(
-        provider=provider_obj,
-        employee=employee,
-        product_id=str(service_id),
-        product_name=result.get("service_name", f"Service {service_id}"),
-        quantity=len(mails),
-        total_price=None,     # nếu API trả giá thì update vào đây
-        trans_id=",".join(map(str, order_ids)),
-        status="success",
-        raw_response={"orders": mails},
-    )
+        if not order_id or not email:
+            logger.error(f"[Muaview] response thiếu dữ liệu: {result}")
+            continue
 
-    # insert từng mail
-    for m in mails:
+        # -------- 1️⃣ SAVE TRANSACTION --------
+        purchase = MailTransaction.objects.create(
+            provider=provider_obj,
+            employee=employee,
+            product_id=str(service_id),
+            product_name=result.get("service_name", f"Service {service_id}"),
+            quantity=1,
+            total_price=None,
+            trans_id=order_id,     # ❗ 1 order = 1 transaction
+            status="success",
+            raw_response=result,
+        )
+
+        # -------- 2️⃣ SAVE PURCHASED MAIL --------
         PurchasedMail.objects.create(
             purchase=purchase,
-            email=m.get("email"),
-            password=m.get("password"),
-            refresh_token=m.get("refresh_token", ""),
-            client_id=m.get("client_id", ""),
-            provider=m.get("provider", provider),
+            email=email,
+            password="",
+            refresh_token="",
+            client_id=order_id,
+            provider=provider,
             is_used=False
         )
-    logger.info(mails)
-    print("-------------")
+
+        mail = {
+            "email": email,
+            "password": "",
+            "refresh_token": "",
+            "client_id": order_id,
+            "provider": provider,
+        }
+
+        mails.append(mail)
+        logger.info(f"[Muaview] saved mail: {email}")
+
+        time.sleep(1)
+
     return {
-        "status": "success",
+        "status": "success" if mails else "error",
         "message": f"Đã mua {len(mails)} email(s).",
         "mails": mails
     }
@@ -416,11 +428,15 @@ def buy_mail_shopgmail(employee, service_id, quality: int = 1):
     url = conf["base_url"] + conf["endpoints"]["buy"]
 
     mails = []
-    order_ids = []
-    logger.info(f"service_id: {service_id}")
-    # Lặp từng lần tạo order vì API chỉ trả về 1 mail/order
-    for i in range(quality):
 
+    provider_obj, _ = MailProvider.objects.get_or_create(
+        name=provider,
+        defaults={"base_url": conf["base_url"], "api_key": conf["key"]},
+    )
+
+    logger.info(f"service_id: {service_id}")
+
+    for i in range(quality):
         params = {
             "apikey": conf["key"],
             "service": service_id
@@ -432,54 +448,55 @@ def buy_mail_shopgmail(employee, service_id, quality: int = 1):
             logger.info(f"[shopgmail][Buy][{i+1}/{quality}] response: {data}")
         except Exception as e:
             logger.error(f"Lỗi khi gọi API shopgmail: {e}")
-            return {"status": "error", "message": "Lỗi hệ thống khi mua mail"}
+            continue
 
         result = data.get("data", {})
-    
-        mail = {
-            "email": result.get("email"),
-            "password": "",
-            "refresh_token": "",
-            "client_id": result.get("orderid"),
-            "provider": provider,
-        }
-        logger.info(mail)
-        mails.append(mail)
-        order_ids.append(result.get("orderid"))
-        time.sleep(1)
-    # -------- SAVE TO DATABASE --------
-    provider_obj, _ = MailProvider.objects.get_or_create(
-        name=provider,
-        defaults={"base_url": conf["base_url"], "api_key": conf["key"]},
-    )
+        order_id = result.get("orderid")
+        email = result.get("email")
 
-    purchase = MailTransaction.objects.create(
-        provider=provider_obj,
-        employee=employee,
-        product_id=str(service_id),
-        product_name=result.get("service_name", f"Service {service_id}"),
-        quantity=len(mails),
-        total_price=None,     # nếu API trả giá thì update vào đây
-        trans_id=",".join(map(str, order_ids)),
-        status="success",
-        raw_response={"orders": mails},
-    )
+        if not order_id or not email:
+            logger.error(f"[shopgmail] response thiếu dữ liệu: {result}")
+            continue
 
-    # insert từng mail
-    for m in mails:
-        PurchasedMail.objects.create(
+        # -------- 1️⃣ SAVE TRANSACTION --------
+        purchase = MailTransaction.objects.create(
+            provider=provider_obj,
+            employee=employee,
+            product_id=str(service_id),
+            product_name=result.get("service", f"Service {service_id}"),
+            quantity=1,
+            total_price=None,
+            trans_id=order_id,        # ❗ mỗi order 1 transaction
+            status="success",
+            raw_response=result,
+        )
+
+        # -------- 2️⃣ SAVE PURCHASED MAIL --------
+        purchased_mail = PurchasedMail.objects.create(
             purchase=purchase,
-            email=m.get("email"),
-            password=m.get("password"),
-            refresh_token=m.get("refresh_token", ""),
-            client_id=m.get("client_id", ""),
-            provider=m.get("provider", provider),
+            email=email,
+            password="",
+            refresh_token="",
+            client_id=order_id,
+            provider=provider,
             is_used=False
         )
-    logger.info(mails)
-    print("-------------")
+
+        mail = {
+            "email": email,
+            "password": "",
+            "refresh_token": "",
+            "client_id": order_id,
+            "provider": provider,
+        }
+
+        mails.append(mail)
+        logger.info(f"[shopgmail] saved mail: {email}")
+
+        time.sleep(1)
+
     return {
-        "status": "success",
+        "status": "success" if mails else "error",
         "message": f"Đã mua {len(mails)} email(s).",
         "mails": mails
     }
