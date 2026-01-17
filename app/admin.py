@@ -1,13 +1,41 @@
 from django.contrib import admin
 from django.contrib.admin import DateFieldListFilter
+from import_export.admin import ExportMixin
+
 from .models import (
-    PhoneAccount, Employee, Customer, MailProvider, MailTransaction,
-    PurchasedMail, EmployeeGroup, TextNowAccount, AppleMailProxy,
-    CustomerAssignHistory
+    PhoneAccount,
+    Employee,
+    Customer,
+    MailProvider,
+    MailTransaction,
+    PurchasedMail,
+    EmployeeGroup,
+    TextNowAccount,
+    AppleMailProxy,
+    CustomerAssignHistory,
 )
 
+
+# ==============================
+# BASE ADMIN: EXPORT FOR ALL
+# ==============================
+class BaseExportAdmin(ExportMixin, admin.ModelAdmin):
+    """
+    Base admin cho toàn hệ thống
+    - Có Export (csv / xlsx / json)
+    - Ăn theo filter + search
+    - Chỉ superuser được export
+    """
+
+    def has_export_permission(self, request):
+        return request.user.is_superuser
+
+
+# ==============================
+# PHONE ACCOUNT
+# ==============================
 @admin.register(PhoneAccount)
-class PhoneAccountAdmin(admin.ModelAdmin):
+class PhoneAccountAdmin(BaseExportAdmin):
 
     list_display = (
         "id",
@@ -56,8 +84,12 @@ class PhoneAccountAdmin(admin.ModelAdmin):
     customer_name.short_description = "Khách hàng dùng"
 
 
+# ==============================
+# CUSTOMER
+# ==============================
 @admin.register(Customer)
-class CustomerAdmin(admin.ModelAdmin):
+class CustomerAdmin(BaseExportAdmin):
+
     list_display = (
         "id",
         "user",
@@ -79,8 +111,12 @@ class CustomerAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+# ==============================
+# EMPLOYEE
+# ==============================
 @admin.register(Employee)
-class EmployeeAdmin(admin.ModelAdmin):
+class EmployeeAdmin(BaseExportAdmin):
+
     list_display = (
         "id",
         "user",
@@ -105,8 +141,12 @@ class EmployeeAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+# ==============================
+# MAIL PROVIDER
+# ==============================
 @admin.register(MailProvider)
-class MailProviderAdmin(admin.ModelAdmin):
+class MailProviderAdmin(BaseExportAdmin):
+
     list_display = (
         "id",
         "name",
@@ -128,8 +168,12 @@ class MailProviderAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+# ==============================
+# MAIL TRANSACTION
+# ==============================
 @admin.register(MailTransaction)
-class MailTransactionAdmin(admin.ModelAdmin):
+class MailTransactionAdmin(BaseExportAdmin):
+
     list_display = (
         "id",
         "provider",
@@ -157,8 +201,12 @@ class MailTransactionAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+# ==============================
+# PURCHASED MAIL
+# ==============================
 @admin.register(PurchasedMail)
-class PurchasedMailAdmin(admin.ModelAdmin):
+class PurchasedMailAdmin(BaseExportAdmin):
+
     list_display = (
         "id",
         "purchase",
@@ -184,8 +232,12 @@ class PurchasedMailAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+# ==============================
+# EMPLOYEE GROUP
+# ==============================
 @admin.register(EmployeeGroup)
-class EmployeeGroupAdmin(admin.ModelAdmin):
+class EmployeeGroupAdmin(BaseExportAdmin):
+
     list_display = ("id", "name", "created_at", "updated_at")
 
     readonly_fields = ("created_at", "updated_at")
@@ -200,8 +252,12 @@ class EmployeeGroupAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+# ==============================
+# TEXTNOW ACCOUNT
+# ==============================
 @admin.register(TextNowAccount)
-class TextNowAccountAdmin(admin.ModelAdmin):
+class TextNowAccountAdmin(BaseExportAdmin):
+
     list_display = (
         "id",
         "employee",
@@ -226,8 +282,12 @@ class TextNowAccountAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+# ==============================
+# APPLE MAIL PROXY
+# ==============================
 @admin.register(AppleMailProxy)
-class AppleMailProxyAdmin(admin.ModelAdmin):
+class AppleMailProxyAdmin(BaseExportAdmin):
+
     list_display = (
         "id",
         "employee",
@@ -251,8 +311,12 @@ class AppleMailProxyAdmin(admin.ModelAdmin):
     ordering = ("-created_at",)
 
 
+# ==============================
+# CUSTOMER ASSIGN HISTORY
+# ==============================
 @admin.register(CustomerAssignHistory)
-class CustomerAssignHistoryAdmin(admin.ModelAdmin):
+class CustomerAssignHistoryAdmin(BaseExportAdmin):
+
     list_display = (
         "id",
         "phone_count",
@@ -260,10 +324,10 @@ class CustomerAssignHistoryAdmin(admin.ModelAdmin):
         "reset_count",
         "is_revoke",
         "created_at",
-        "updated_at"
+        "updated_at",
     )
 
-    readonly_fields = ("created_at", "updated_at", )
+    readonly_fields = ("created_at", "updated_at")
 
     list_filter = (
         "is_revoke",
@@ -273,4 +337,3 @@ class CustomerAssignHistoryAdmin(admin.ModelAdmin):
     search_fields = ("creator__username",)
 
     ordering = ("-created_at",)
-

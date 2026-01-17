@@ -274,13 +274,13 @@ def run_curl(curl_text):
     }
 
 
-def run_curl_with_retry(batch_cmd: str, retries: int = 3, delay: float = 1.0):
+def run_curl_with_retry(batch_cmd: str, retries: int = 2, delay: float = 1.0):
     """
     Gọi run_curl(batch_cmd) tối đa 3 lần.
     Nếu bất kỳ lần nào trả về status < 400 → coi như live.
     Nếu lỗi hoặc status >= 400 → thử lại tối đa 3 lần.
     """
-
+    print("??????????????????")
     for attempt in range(1, retries + 1):
         try:
             result = run_curl(batch_cmd)

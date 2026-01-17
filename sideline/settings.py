@@ -49,6 +49,7 @@ INSTALLED_APPS = [
     'rest_framework_simplejwt',
     'rest_framework_simplejwt.token_blacklist',
     'corsheaders',
+    'import_export',
     'app',
 ]
 
@@ -94,11 +95,14 @@ ROOT_URLCONF = 'sideline.urls'
 # ✅ Chỉ định rõ domain frontend
 CORS_ALLOWED_ORIGINS = [
     "http://localhost:5173",  # frontend dev
+    "http://localhost:3000",
     "http://38.145.199.150",
     "http://38.145.199.151",
     "https://sideliine.com",
     "https://messages-textfree.com"
 ]
+
+CSRF_TRUSTED_ORIGINS = ["http://38.145.199.151", "https://sideliine.com", "https://messages-textfree.com"]
 
 CSRF_TRUSTED_ORIGINS = ["http://38.145.199.151", "http://localhost:5173", "https://sideliine.com", "https://messages-textfree.com"]
 
