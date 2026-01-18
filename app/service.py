@@ -646,80 +646,51 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
             "date": "",
         }
 
-    # =============== SHOPGMAIL (client_id = order_id) =================
-    if provider == "shopgmail":
-        url = API_CONFIG["shopgmail"]["base_url"] + API_CONFIG["shopgmail"]["endpoints"]["otp"]
-        params = {
-            "apikey": API_CONFIG["shopgmail"]["key"],
-            "orderid": client_id,   # client_id chính là order_id
-        }
-        logger.info(f"client_id: {client_id}")
-        try:
-            resp = requests.get(url, params=params, timeout=15)
-            data = resp.json()
-            print("data: ", data)
-        except Exception as e:
-            logger.error(f"shopgmail OTP error: {e}")
-            return {"status": "error", "message": "Không kết nối được shopgmail"}
-
-        result = data.get("data", {}) or {}
-        otp = result.get("otp")
-        return {
-            "status": "success" if otp else "pending",
-            "provider": "shopgmail",
-            "email": result.get("email") or email,
-            "auth_code": otp or "",
-            "from": "",
-            "subject": "",
-            "date": "",
-        }
-
-    # ============= SELLMO & DONGVAN (OAuth2 inbox) =================
-    if not all([email, refresh_token, client_id]):
-        return {"status": "error", "message": "Thiếu email/refresh_token/client_id để lấy OTP"}
 
     # nếu không lookup được thì fallback default là dongvan
-    if provider not in ("sellmmo", "dongvan"):
+    if provider in ("sellmmo", "dongvan"):
         provider = "dongvan"
 
-    url = API_CONFIG[provider]["endpoints"]["otp"]  # đều là tools.dongvanfb.net/api/get_messages_oauth2
-    payload = {
-        "email": email.strip(),
-        "refresh_token": refresh_token.strip(),
-        "client_id": client_id.strip(),
-    }
+        url = API_CONFIG[provider]["endpoints"]["otp"]  # đều là tools.dongvanfb.net/api/get_messages_oauth2
+        payload = {
+            "email": email.strip(),
+            "refresh_token": refresh_token.strip(),
+            "client_id": client_id.strip(),
+        }
 
-    try:
-        resp = requests.post(url, json=payload, timeout=20)
-        data = resp.json()
-    except Exception as e:
-        logger.error(f"Lỗi OTP {provider}: {e}")
-        return {"status": "error", "message": f"Lỗi hệ thống khi gọi OTP {provider}."}
+        try:
+            resp = requests.post(url, json=payload, timeout=20)
+            data = resp.json()
+        except Exception as e:
+            logger.error(f"Lỗi OTP {provider}: {e}")
+            return {"status": "error", "message": f"Lỗi hệ thống khi gọi OTP {provider}."}
 
-    messages = data.get("messages", []) or []
-    if not messages:
-        return {"status": "error", "message": f"Không có email nào trong hộp thư {email}."}
+        messages = data.get("messages", []) or []
+        if not messages:
+            return {"status": "error", "message": f"Không có email nào trong hộp thư {email}."}
 
-    # dò mã xác minh trong từng email
-    for m in messages:
-        if not m.get("code"):
-            html_content = m.get("message", "")
-            code = extract_auth_code(html_content)
-            if code:
-                m["code"] = code
+        # dò mã xác minh trong từng email
+        for m in messages:
+            if not m.get("code"):
+                html_content = m.get("message", "")
+                code = extract_auth_code(html_content)
+                if code:
+                    m["code"] = code
 
-    messages_with_code = [m for m in messages if m.get("code")]
-    if not messages_with_code:
-        return {"status": "error", "message": f"Không tìm thấy mã xác minh trong hộp thư {email}."}
+        messages_with_code = [m for m in messages if m.get("code")]
+        if not messages_with_code:
+            return {"status": "error", "message": f"Không tìm thấy mã xác minh trong hộp thư {email}."}
 
-    latest_msg = sorted(messages_with_code, key=lambda x: x.get("uid", 0))[-1]
+        latest_msg = sorted(messages_with_code, key=lambda x: x.get("uid", 0))[-1]
 
-    return {
-        "status": "success",
-        "provider": provider,
-        "email": data.get("email") or email,
-        "auth_code": latest_msg.get("code"),
-        "from": latest_msg.get("from"),
-        "subject": latest_msg.get("subject"),
-        "date": latest_msg.get("date"),
-    }
+        return {
+            "status": "success",
+            "provider": provider,
+            "email": data.get("email") or email,
+            "auth_code": latest_msg.get("code"),
+            "from": latest_msg.get("from"),
+            "subject": latest_msg.get("subject"),
+            "date": latest_msg.get("date"),
+        }
+    else:
+        return {"status": "error", "message": f"Dịch vụ không hỗ trợ."}
