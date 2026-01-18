@@ -8,7 +8,7 @@ import time
 from bs4 import BeautifulSoup
 from django.db.models import Q
 import os
-from .utils import extract_auth_code 
+from .utils import extract_auth_code, parse_mail_date 
 load_dotenv()
 
 SELLMMO_KEY = os.environ.get('SELLMMO_KEY')
@@ -647,7 +647,6 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
         }
 
 
-    # nếu không lookup được thì fallback default là dongvan
     if provider in ("sellmmo", "dongvan"):
         provider = "dongvan"
 
@@ -681,7 +680,10 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
         if not messages_with_code:
             return {"status": "error", "message": f"Không tìm thấy mã xác minh trong hộp thư {email}."}
 
-        latest_msg = sorted(messages_with_code, key=lambda x: x.get("uid", 0))[-1]
+        latest_msg = max(
+            messages_with_code,
+            key=lambda x: parse_mail_date(x.get("date", ""))
+        )
 
         return {
             "status": "success",
@@ -693,4 +695,4 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
             "date": latest_msg.get("date"),
         }
     else:
-        return {"status": "error", "message": f"Dịch vụ không hỗ trợ."}
+        return {"status": "error", "message": f"Dịch vụ không hỗ trợ ."}

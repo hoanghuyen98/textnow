@@ -15,6 +15,15 @@ except Exception:
 import time
 
 
+def parse_mail_date(date_str: str):
+    """
+    "21:59 - 17/01/2026" → datetime
+    """
+    try:
+        return datetime.strptime(date_str.strip(), "%H:%M - %d/%m/%Y")
+    except Exception:
+        return datetime.min
+
 def to_utc_isoformat(t):
     """
     Chuyển '2025-11-10 04:33:25.871598' → '2025-11-10T04:33:25Z'
