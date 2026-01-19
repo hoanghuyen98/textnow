@@ -646,6 +646,33 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
             "date": "",
         }
 
+    if provider == "shopgmail":
+        url = API_CONFIG["shopgmail"]["base_url"] + API_CONFIG["shopgmail"]["endpoints"]["otp"]
+        params = {
+            "apikey": API_CONFIG["shopgmail"]["key"],
+            "orderid": client_id,   # client_id chính là order_id
+        }
+        logger.info(f"client_id: {client_id}")
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            data = resp.json()
+        except Exception as e:
+            logger.error(f"shopgmail OTP error: {e}")
+            return {"status": "error", "message": "Không kết nối được shopgmail"}
+
+        result = data.get("data", {}) or {}
+        otp = result.get("otp")
+
+        return {
+            "status": "success" if otp else "pending",
+            "provider": "muaview_that",
+            "email": result.get("email") or email,
+            "auth_code": otp or "",
+            "from": "",
+            "subject": "",
+            "date": "",
+        }
+
 
     if provider in ("sellmmo", "dongvan"):
         provider = "dongvan"
