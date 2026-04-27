@@ -94,7 +94,6 @@ def fetch_categories(provider: str):
     try:
         resp = requests.get(url, params=params, timeout=10)
         data = resp.json()
-        
     except Exception as e:
         logger.error(f"Lỗi khi gọi tới API của {provider}: {str(e)}")
         return {"status": "error", "message": "Lỗi hệ thống"}
@@ -103,11 +102,11 @@ def fetch_categories(provider: str):
     if provider == "sellmmo":
         categories = data.get("categories") or []
 
-        # Các category cần lấy
         allowed_category_ids = {"14", "57"}
+        all_ids = [str(cat.get("id")) for cat in categories]
+        logger.info(f"[sellmmo] all category ids from API: {all_ids}")
 
         for cat in categories:
-            # Nếu id không thuộc danh sách → bỏ qua
             if str(cat.get("id")) not in allowed_category_ids:
                 continue
 
@@ -130,6 +129,7 @@ def fetch_categories(provider: str):
 
     elif provider == "dongvan":
         items = data.get("data") or []
+        logger.info(f"[dongvan] all ids from API: {[item.get('id') for item in items]}")
         for item in items:
             if not str(item.get("id", "")).isdigit():
                 continue
@@ -148,6 +148,7 @@ def fetch_categories(provider: str):
     elif provider == "muaview":
         items = data.get("data") or []
         allowed_ids = {15, 16}
+        logger.info(f"[muaview] all ids from API: {[item.get('id') for item in items]}")
         for item in items:
             try:
                 item_id = int(item["id"])
@@ -155,6 +156,7 @@ def fetch_categories(provider: str):
                 continue
             if item_id not in allowed_ids:
                 continue
+            logger.info(f"[muaview] matched item keys: {list(item.keys())}, data: {item}")
             try:
                 result.append({
                     "id": item_id,
@@ -167,6 +169,7 @@ def fetch_categories(provider: str):
     elif provider == "muaview_that":
         items = data.get("data") or []
         allowed_ids = {64}
+        logger.info(f"[muaview_that] all ids from API: {[item.get('id') for item in items]}")
         for item in items:
             try:
                 item_id = int(item.get("id", -1))
@@ -174,6 +177,7 @@ def fetch_categories(provider: str):
                 continue
             if item_id not in allowed_ids:
                 continue
+            logger.info(f"[muaview_that] matched item keys: {list(item.keys())}, data: {item}")
             try:
                 result.append({
                     "id": item_id,
@@ -186,6 +190,7 @@ def fetch_categories(provider: str):
     elif provider == "shopgmail":
         items = data.get("data") or []
         allowed_ids = {155}
+        logger.info(f"[shopgmail] all ids from API: {[item.get('id') for item in items]}")
         for item in items:
             try:
                 item_id = int(item.get("id", -1))
@@ -193,6 +198,7 @@ def fetch_categories(provider: str):
                 continue
             if item_id not in allowed_ids:
                 continue
+            logger.info(f"[shopgmail] matched item keys: {list(item.keys())}, data: {item}")
             try:
                 result.append({
                     "id": item_id,
