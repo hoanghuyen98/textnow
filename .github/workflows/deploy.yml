@@ -15,8 +15,9 @@ jobs:
           username: ${{ vars.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
+            set -e
             PROJECT_DIR="/root/green_sideline"
-            REPO_URL="git@github.com:${{ github.repository }}.git"
+            REPO_URL="https://${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git"
 
             if [ ! -d "$PROJECT_DIR" ]; then
               echo "Folder chưa tồn tại. Đang tiến hành clone..."
@@ -24,7 +25,7 @@ jobs:
             fi
 
             cd $PROJECT_DIR
-            git pull origin main
+            git pull https://${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git main
 
             echo "DEBUG=False" > .env
             echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
