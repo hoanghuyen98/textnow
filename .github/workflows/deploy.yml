@@ -34,6 +34,10 @@ jobs:
             echo "PG_DB=${{ secrets.DB_NAME }}" >> .env
             echo "PG_USERNAME=${{ secrets.DB_USER }}" >> .env
             echo "PG_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "DONGVAN_KEY=${{ vars.DONGVAN_KEY }}" >> .env
+            echo "MUAVIEW_KEY=${{ vars.MUAVIEW_KEY }}" >> .env
+            echo "SELLMMO_KEY=${{ vars.SELLMMO_KEY }}" >> .env
+            echo "SHOPGMAIL_KEY=${{ vars.SHOPGMAIL_KEY }}" >> .env
             echo "PG_HOST=db" >> .env
             echo "PG_PORT=5432" >> .env
             echo "REDIS_URL=redis://redis:6379/0" >> .env
