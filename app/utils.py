@@ -6,7 +6,8 @@ import subprocess
 import os
 
 PROXY_US = os.environ.get('PROXY_US')
-logger.info(PROXY_US)
+logger.info(f"PROXY_US: {'SET (' + PROXY_US[:20] + '...)' if PROXY_US else 'NOT SET'}")
+
 try:
     import curlconverter
     HAS_CONVERTER = True
