@@ -22,6 +22,7 @@ COPY pyproject.toml poetry.lock ./
 
 # Cài đặt thư viện (không tạo môi trường ảo vì Docker đã là một môi trường cô lập)
 RUN poetry config virtualenvs.create false \
+    && poetry lock \
     && poetry install --only main --no-interaction --no-root
 
 # Copy toàn bộ mã nguồn
