@@ -75,18 +75,26 @@ jobs:
           username: ${{ secrets.SSH_USER }}
           key: ${{ secrets.SSH_KEY }}
           script: |
-            cd /path/to/sideline_backend
+            PROJECT_DIR="/root/green_sideline"
+            REPO_URL="git@github.com:${{ github.repository }}.git"
+
+            # 1. Kiểm tra nếu thư mục chưa có thì clone về
+            if [ ! -d "$PROJECT_DIR" ]; then
+              echo "Folder chưa tồn tại. Đang tiến hành clone..."
+              git clone $REPO_URL $PROJECT_DIR
+            fi
+            
+            # 2. Di chuyển vào thư mục và cập nhật code
+            cd $PROJECT_DIR
             git pull origin main
             
-            # Tải image v1.0.0 mới nhất vừa build xong
+            # 3. Triển khai Docker (Lấy image v1.0.0 đã build ở bước trước)
             docker compose pull web
-            
-            # Khởi động lại container với image mới
             docker compose up -d
             
-            # Chạy migrate và collectstatic bên trong container
+            # 4. Chạy các lệnh Django
             docker compose exec -T web python manage.py migrate
             docker compose exec -T web python manage.py collectstatic --noinput
             
-            # Dọn dẹp các image cũ để tránh đầy ổ cứng server
+            # 5. Dọn dẹp
             docker image prune -f
