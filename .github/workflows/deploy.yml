@@ -17,7 +17,7 @@ jobs:
           script: |
             set -e
             docker login -u ${{ vars.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
-            
+
             PROJECT_DIR="/root/green_sideline/sideline-backend"
             REPO_URL="https://${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git"
 
@@ -39,7 +39,8 @@ jobs:
             echo "REDIS_URL=redis://redis:6379/0" >> .env
 
             docker compose pull
-            docker compose up -d --force-recreate
+            docker compose down
+            docker compose up -d
             docker compose exec -T web python manage.py migrate
             docker compose exec -T web python manage.py collectstatic --noinput
             docker image prune -f
