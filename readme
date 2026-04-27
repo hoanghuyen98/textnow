@@ -1,3 +1,5 @@
 poetry run python manage.py check
 poetry run python manage.py migrate
 poetry run python manage.py runserver
+
+- Tag image v1.0.0

@@ -1,0 +1,32 @@
+# Sử dụng Python 3.10 bản slim để nhẹ và ổn định
+FROM python:3.10-slim
+
+# Cài đặt thư viện hệ thống cần thiết cho Postgres và xử lý ảnh (OpenCV/Face Recognition)
+RUN apt-get update && apt-get install -y \
+    libpq-dev \
+    gcc \
+    curl \
+    libsm6 \
+    libxext6 \
+    libxrender-dev \
+    && rm -rf /var/lib/apt/lists/*
+
+# Cài đặt Poetry
+ENV POETRY_VERSION=1.7.1
+RUN curl -sSL https://install.python-poetry.org | python3 -
+ENV PATH="/root/.local/bin:$PATH"
+
+WORKDIR /app
+
+# Copy file cấu hình dependencies để tận dụng Docker cache
+COPY pyproject.toml poetry.lock ./
+
+# Cài đặt thư viện (không tạo môi trường ảo vì Docker đã là một môi trường cô lập)
+RUN poetry config virtualenvs.create false \
+    && poetry install --only main --no-interaction --no-root
+
+# Copy toàn bộ mã nguồn
+COPY . .
+
+# Chạy app bằng Gunicorn (cho môi trường Production)
+CMD ["gunicorn", "--bind", "0.0.0.0:8000", "sideline.wsgi:application"]
