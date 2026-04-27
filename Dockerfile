@@ -1,5 +1,4 @@
-# Sử dụng Python 3.10 bản slim để nhẹ và ổn định
-FROM python:3.10-slim
+FROM python:3.12-slim
 
 # Cài đặt thư viện hệ thống cần thiết cho Postgres và xử lý ảnh (OpenCV/Face Recognition)
 RUN apt-get update && apt-get install -y \
@@ -12,7 +11,7 @@ RUN apt-get update && apt-get install -y \
     && rm -rf /var/lib/apt/lists/*
 
 # Cài đặt Poetry
-ENV POETRY_VERSION=1.7.1
+ENV POETRY_VERSION=1.8.0
 RUN curl -sSL https://install.python-poetry.org | python3 -
 ENV PATH="/root/.local/bin:$PATH"
 
