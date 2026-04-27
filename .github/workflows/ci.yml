@@ -32,7 +32,10 @@ jobs:
       - name: Install Poetry
         uses: snok/install-poetry@v1
       - name: Install deps
-        run: poetry install --no-root
+        run: |
+          # Thêm lệnh này để đồng bộ lại file lock trước khi cài đặt
+          poetry lock --no-update 
+          poetry install --no-root
       - name: Run Tests
         env:
           DB_ENGINE: django.db.backends.postgresql
