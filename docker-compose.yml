@@ -36,7 +36,8 @@ services:
       - SELLMMO_KEY=${SELLMMO_KEY}                                                                                                                                                                                       
       - DONGVAN_KEY=${DONGVAN_KEY}                                                                                                                                                                                
       - MUAVIEW_KEY=${MUAVIEW_KEY}                                                                                                                                                                                       
-      - SHOPGMAIL_KEY=${SHOPGMAIL_KEY}     
+      - SHOPGMAIL_KEY=${SHOPGMAIL_KEY}
+      - PROXY_US=${PROXY_US}
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -58,7 +59,8 @@ services:
       - SELLMMO_KEY=${SELLMMO_KEY} 
       - DONGVAN_KEY=${DONGVAN_KEY}  
       - MUAVIEW_KEY=${MUAVIEW_KEY} 
-      - SHOPGMAIL_KEY=${SHOPGMAIL_KEY} 
+      - SHOPGMAIL_KEY=${SHOPGMAIL_KEY}
+      - PROXY_US=${PROXY_US}
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -73,6 +75,7 @@ services:
     command: celery -A sideline beat -l info
     environment:
       - REDIS_URL=redis://redis:6379/0
+      - PROXY_US=${PROXY_US}
     depends_on:
       - redis
     restart: always
