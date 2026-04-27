@@ -1,5 +1,65 @@
-poetry run python manage.py check
+# Sideline Backend
+
+## Prerequisites
+
+- Docker & Docker Compose
+- Poetry (for local development)
+
+## Local Development
+
+**1. Clone repo**
+```bash
+git clone <repo-url>
+cd sideline-backend
+```
+
+**2. Cài dependencies**
+```bash
+poetry install --no-root
+```
+
+**3. Tạo file `.env`**
+```env
+
+```
+
+**4. Chạy migrate và server**
+```bash
 poetry run python manage.py migrate
 poetry run python manage.py runserver
+```
 
-- Tag image v1.0.0
+## Run with Docker
+
+```bash
+docker compose pull
+docker compose up -d --force-recreate
+```
+
+-- Build
+
+```bash
+docker build -t sideline-backend:local .
+```
+
+## Useful Commands
+
+```bash
+# Chạy test
+poetry run python manage.py test app
+
+# Tạo migration
+poetry run python manage.py makemigrations
+
+# Backup database
+docker compose exec db pg_dump -U $PG_USERNAME $PG_DB > backup.sql
+
+# Restore database
+docker compose exec -T db psql -U $PG_USERNAME $PG_DB < backup.sql
+
+# Xem log
+docker logs -f sideline_web
+
+# restart service
+docker compose restart web (ten service trong docker-compose.yml)
+```

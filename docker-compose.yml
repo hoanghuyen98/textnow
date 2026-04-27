@@ -7,14 +7,13 @@ services:
     volumes:
       - postgres_data:/var/lib/postgresql/data
     environment:
-      - POSTGRES_DB=${DB_NAME}
-      - POSTGRES_USER=${DB_USER}
-      - POSTGRES_PASSWORD=${DB_PASSWORD}
+      - POSTGRES_DB=${PG_DB}
+      - POSTGRES_USER=${PG_USERNAME}
+      - POSTGRES_PASSWORD=${PG_PASSWORD}
     ports:
       - "5432:5432"
     restart: always
 
-  # Thêm Redis làm Message Broker cho Celery
   redis:
     image: redis:7-alpine
     container_name: sideline_redis
@@ -23,40 +22,37 @@ services:
   web:
     image: 01646083113/sideline-backend:v1.0.0
     container_name: sideline_web
-    # Trên server, ta dùng trực tiếp image đã build, không cần build lại hay mount code
     ports:
       - "8000:8000"
     environment:
-      - DB_ENGINE=django.db.backends.postgresql
-      - DB_NAME=${DB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db
-      - DB_PORT=5432
+      - PG_DB=${PG_DB}
+      - PG_USERNAME=${PG_USERNAME}
+      - PG_PASSWORD=${PG_PASSWORD}
+      - PG_HOST=db
+      - PG_PORT=5432
       - REDIS_URL=redis://redis:6379/0
       - DEBUG=False
+      - SECRET_KEY=${SECRET_KEY}
     depends_on:
       - db
       - redis
     restart: always
 
-  # Container chuyên chạy tác vụ ngầm
   celery_worker:
     image: 01646083113/sideline-backend:v1.0.0
     container_name: sideline_worker
     command: celery -A sideline worker -l info
     environment:
-      - DB_NAME=${DB_NAME}
-      - DB_USER=${DB_USER}
-      - DB_PASSWORD=${DB_PASSWORD}
-      - DB_HOST=db
+      - PG_DB=${PG_DB}
+      - PG_USERNAME=${PG_USERNAME}
+      - PG_PASSWORD=${PG_PASSWORD}
+      - PG_HOST=db
       - REDIS_URL=redis://redis:6379/0
     depends_on:
       - db
       - redis
     restart: always
 
-  # Container chuyên chạy tác vụ định kỳ (nếu Huyền có dùng Task Schedule)
   celery_beat:
     image: 01646083113/sideline-backend:v1.0.0
     container_name: sideline_beat
