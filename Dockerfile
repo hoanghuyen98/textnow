@@ -28,5 +28,7 @@ RUN poetry config virtualenvs.create false \
 # Copy toàn bộ mã nguồn
 COPY . .
 
-# Chạy app bằng Gunicorn (cho môi trường Production)
-CMD ["gunicorn", "--bind", "0.0.0.0:8000", "sideline.wsgi:application"]
+COPY entrypoint.sh .
+RUN chmod +x entrypoint.sh
+
+CMD ["./entrypoint.sh"]
