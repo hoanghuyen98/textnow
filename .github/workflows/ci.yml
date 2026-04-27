@@ -3,7 +3,6 @@ name: CI/CD Docker Pipeline
 on:
   push:
     branches: [ "**" ]
-  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
