@@ -73,8 +73,8 @@ jobs:
       - name: Build and push
         uses: docker/build-push-action@v5
         with:
-          push: true
-          # Build đúng tag v1.0.0 như bạn mong muốn
+          push: ${{ github.ref == 'refs/heads/main' }}
+          # tags: 01646083113/sideline-backend:${{ github.ref_name }}
           tags: 01646083113/sideline-backend:v1.0.0
 
   deploy:
