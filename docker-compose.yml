@@ -33,6 +33,10 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY}
+      - SELLMMO_KEY=${SELLMMO_KEY}                                                                                                                                                                                       
+      - DONGVAN_KEY=${DONGVAN_KEY}                                                                                                                                                                                
+      - MUAVIEW_KEY=${MUAVIEW_KEY}                                                                                                                                                                                       
+      - SHOPGMAIL_KEY=${SHOPGMAIL_KEY}     
     dns:
       - 8.8.8.8
       - 8.8.4.4
@@ -44,13 +48,17 @@ services:
   celery_worker:
     image: 01646083113/sideline-backend:v1.0.0
     container_name: sideline_worker
-    command: celery -A sideline worker -l info
+    command: celery -A sideline worker -l info -P gevent --concurrency 100 --max-tasks-per-child 500
     environment:
       - PG_DB=${PG_DB}
       - PG_USERNAME=${PG_USERNAME}
       - PG_PASSWORD=${PG_PASSWORD}
       - PG_HOST=db
       - REDIS_URL=redis://redis:6379/0
+      - SELLMMO_KEY=${SELLMMO_KEY} 
+      - DONGVAN_KEY=${DONGVAN_KEY}  
+      - MUAVIEW_KEY=${MUAVIEW_KEY} 
+      - SHOPGMAIL_KEY=${SHOPGMAIL_KEY} 
     dns:
       - 8.8.8.8
       - 8.8.4.4
