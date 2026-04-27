@@ -103,9 +103,14 @@ CORS_ALLOWED_ORIGINS = [
     "https://messages-textfree.com"
 ]
 
-CSRF_TRUSTED_ORIGINS = ["http://38.145.199.151", "https://sideliine.com", "https://messages-textfree.com"]
-
-CSRF_TRUSTED_ORIGINS = ["http://38.145.199.151", "http://localhost:5173", "https://sideliine.com", "https://messages-textfree.com"]
+CSRF_TRUSTED_ORIGINS = [
+    "http://38.145.199.151",
+    "http://localhost:5173",
+    "https://sideliine.com",
+    "https://www.sideliine.com",
+    "https://api.sideliine.com",
+    "https://messages-textfree.com",
+]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
     r"^https://.*\.ngrok-free\.dev$",
