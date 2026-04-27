@@ -56,4 +56,10 @@ docker compose exec db pg_dump -U $PG_USERNAME $PG_DB > backup.sql
 
 # Restore database
 docker compose exec -T db psql -U $PG_USERNAME $PG_DB < backup.sql
+
+# Xem log
+docker logs -f sideline_web
+
+# restart service
+docker compose restart web (ten service trong docker-compose.yml)
 ```
