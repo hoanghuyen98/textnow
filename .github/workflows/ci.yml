@@ -69,6 +69,8 @@ jobs:
         with:
           push: false
           tags: 01646083113/sideline-backend:v1.0.0
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
 
   push:
     needs: build
@@ -87,3 +89,5 @@ jobs:
         with:
           push: true
           tags: 01646083113/sideline-backend:v1.0.0
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
