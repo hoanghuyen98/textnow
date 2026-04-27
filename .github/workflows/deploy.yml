@@ -16,7 +16,9 @@ jobs:
           key: ${{ secrets.SSH_KEY }}
           script: |
             set -e
-            PROJECT_DIR="/root/green_sideline"
+            docker login -u ${{ vars.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+            
+            PROJECT_DIR="/root/green_sideline/sideline-backend"
             REPO_URL="https://${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git"
 
             if [ ! -d "$PROJECT_DIR" ]; then
