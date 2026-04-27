@@ -12,7 +12,6 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          env:
           POSTGRES_DB: test_db
           POSTGRES_USER: test_user
           POSTGRES_PASSWORD: test_pass
@@ -38,12 +37,11 @@ jobs:
           poetry install --no-root
       - name: Run Tests
         env:
-          DB_ENGINE: django.db.backends.postgresql
-          DB_NAME: test_db
-          DB_USER: test_user
-          DB_PASSWORD: test_pass
-          DB_HOST: localhost
-          DB_PORT: 5432
+          PG_DB: test_db
+          PG_USERNAME: test_user
+          PG_PASSWORD: test_pass
+          PG_HOST: localhost
+          PG_PORT: 5432
           DEBUG: "False"
           SECRET_KEY: "test-secret-key"
         run: |
@@ -104,12 +102,11 @@ jobs:
             # Dấu > để ghi mới, >> để viết tiếp vào cuối file
             echo "DEBUG=False" > .env
             echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
-            echo "DB_ENGINE=django.db.backends.postgresql" >> .env
-            echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
-            echo "DB_USER=${{ secrets.DB_USER }}" >> .env
-            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-            echo "DB_HOST=db" >> .env
-            echo "DB_PORT=5432" >> .env
+            echo "PG_DB=${{ secrets.DB_NAME }}" >> .env        # ← đổi thành PG_*
+            echo "PG_USERNAME=${{ secrets.DB_USER }}" >> .env
+            echo "PG_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "PG_HOST=db" >> .env
+            echo "PG_PORT=5432" >> .env
             echo "REDIS_URL=redis://redis:6379/0" >> .env
 
             # 3. Kéo Image mới nhất và khởi động lại các container
