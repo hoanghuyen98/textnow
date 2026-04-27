@@ -33,6 +33,9 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - DEBUG=False
       - SECRET_KEY=${SECRET_KEY}
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       - db
       - redis
@@ -48,6 +51,9 @@ services:
       - PG_PASSWORD=${PG_PASSWORD}
       - PG_HOST=db
       - REDIS_URL=redis://redis:6379/0
+    dns:
+      - 8.8.8.8
+      - 8.8.4.4
     depends_on:
       - db
       - redis

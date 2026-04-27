@@ -1231,16 +1231,22 @@ class MailCategoriesView(APIView):
             )
 
         provider = provider.lower().strip()
-        result = fetch_categories(provider)
+        try:
+            result = fetch_categories(provider)
+        except ValueError as e:
+            return Response(
+                {"status": "error", "message": str(e)},
+                status=status.HTTP_400_BAD_REQUEST
+            )
 
         if result.get("status") == "error":
             return Response(
-                {"status": "error", "message": result.get("error", "Không thể lấy danh sách mail.")},
+                {"status": "error", "message": result.get("message", "Không thể lấy danh sách mail.")},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         if result.get("status") == "success":
             return Response(
-                {"status": "success", "provider": provider, "categories": result.get("categories", result)},
+                {"status": "success", "provider": provider, "categories": result.get("data", [])},
                 status=status.HTTP_200_OK
             )
 
