@@ -9,90 +9,93 @@ on:
 jobs:
   test:
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v4
-    
-    - name: Set up Python 3.10
-      uses: actions/setup-python@v5 # Cập nhật lên v5
-      with:
-        python-version: "3.10"
-        cache: 'pip' # Tự động cache các gói pip
-    
-    - name: Install pipenv
-      run: pip install pipenv
-    
-    - name: Install dependencies
-      run: pipenv install --deploy --dev
-      env:
-        PIPENV_VENV_IN_PROJECT: 1
-    
-    - name: Run Tests & Coverage
-      # Gộp chạy migration, test và coverage vào một block để quản lý env dễ hơn
-      env:
-        DEBUG: "False"
-        SECRET_KEY: "test-secret-key"
-        ALLOWED_HOSTS: "localhost,127.0.0.1"
-      run: |
-        pipenv run python manage.py migrate
-        # Chạy coverage luôn trong lúc test để không phải chạy lại 2 lần
-        pipenv run coverage run --source='app' manage.py test app
-        pipenv run coverage report
+      - uses: actions/checkout@v4
+      
+      - name: Set up Python 3.10
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      
+      - name: Install Poetry
+        uses: snok/install-poetry@v1
+        with:
+          virtualenvs-create: true
+          virtualenvs-in-project: true
+      
+      - name: Load cached venv
+        id: cached-poetry-dependencies
+        uses: actions/cache@v3
+        with:
+          path: .venv
+          key: venv-${{ runner.os }}-${{ hashFiles('**/poetry.lock') }}
+      
+      - name: Install dependencies
+        if: steps.cached-poetry-dependencies.outputs.cache-hit != 'true'
+        run: poetry install --no-interaction --no-root
+      
+      - name: Run Tests & Coverage
+        env:
+          DEBUG: "False"
+          SECRET_KEY: "test-secret-key"
+          ALLOWED_HOSTS: "localhost,127.0.0.1"
+        run: |
+          poetry run python manage.py migrate
+          poetry run coverage run --source='app' manage.py test app
+          poetry run coverage report
 
   lint:
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.10"
-    
-    - name: Install dependencies
-      run: |
-        pip install flake8 black isort
-    
-    - name: Run flake8
-      run: flake8 app sideline --max-line-length=120 --ignore=E501,W503
-      continue-on-error: true
-    
-    - name: Check code formatting with black
-      run: black --check app sideline --line-length=120
-      continue-on-error: true
-    
-    - name: Check import sorting with isort
-      run: isort --check-only app sideline
-      continue-on-error: true
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install Linting tools
+        run: pip install flake8 black isort
+      - name: Run Checks
+        run: |
+          flake8 app sideline --max-line-length=120 --ignore=E501,W503
+          black --check app sideline --line-length=120
+          isort --check-only app sideline
+        continue-on-error: true
 
   security:
     runs-on: ubuntu-latest
-    
     steps:
-    - uses: actions/checkout@v3
-    
-    - name: Set up Python
-      uses: actions/setup-python@v4
-      with:
-        python-version: "3.10"
-    
-    - name: Install security checking tools
-      run: pip install bandit safety
-    
-    - name: Run bandit security check
-      run: bandit -r app sideline -ll
-      continue-on-error: true
-    
-    - name: Check for known vulnerabilities
-      run: safety check --json
-      continue-on-error: true
+      - uses: actions/checkout@v4
+      - name: Set up Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - name: Install Security tools
+        run: pip install bandit safety
+      - name: Run Security Check
+        run: |
+          bandit -r app sideline -ll
+          # Safety check cần API key ở bản mới, nếu lỗi hãy comment dòng dưới
+          safety check --json
+        continue-on-error: true
 
-  deploy-success:
+  deploy:
     needs: [test, lint, security]
+    if: github.event_name == 'push' && github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
-    if: success()
-    
     steps:
-    - name: Notify deployment success
-      run: echo "All checks passed! Ready for deployment."
+      - name: Deploy to Server via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.SSH_HOST }}
+          username: ${{ secrets.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          port: ${{ secrets.SSH_PORT }}
+          script: |
+            cd /path/to/your/project
+            git pull origin main
+            export PATH="$HOME/.local/bin:$PATH"
+            poetry install --only main --no-interaction
+            poetry run python manage.py migrate
+            poetry run python manage.py collectstatic --noinput
+            # sudo systemctl restart gunicorn
+            echo "Deploy hoàn tất!"
