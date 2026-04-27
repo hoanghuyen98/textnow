@@ -30,8 +30,8 @@ BASE_DIR = Path(__file__).resolve().parent.parent
 SECRET_KEY = os.environ.get('SECRET_KEY', 'django-insecure-97@7qqje=$3f)%t)lkt(#03j25#i#+hh-2+zb*la$w9$6z68i1')
 
 # SECURITY WARNING: don't run with debug turned on in production!
-DEBUG = os.getenv("DEBUG", True)
-
+DEBUG = os.getenv("DEBUG", False)
+logger.info(DEBUG)
 ALLOWED_HOSTS = ['*']
 
 
@@ -115,73 +115,71 @@ SIMPLE_JWT = {
     'REFRESH_TOKEN_LIFETIME': timedelta(days=1),
 }
 
-logger.info(DEBUG)
-
 # --------- cau hinh luu log ----------------------
-if DEBUG == "False":
+# if DEBUG == False:
 
-    LOG_DIR = "/var/log/sideline"
-    LOG_FILE = os.path.join(LOG_DIR, "app.log")
+#     LOG_DIR = "/var/log/sideline"
+#     LOG_FILE = os.path.join(LOG_DIR, "app.log")
 
-    os.makedirs(LOG_DIR, exist_ok=True)
+#     os.makedirs(LOG_DIR, exist_ok=True)
 
-    logfile(LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5)
-    logger.debug(f"Log directory: {LOG_FILE}")
+#     logfile(LOG_FILE, maxBytes=10 * 1024 * 1024, backupCount=5)
+#     logger.debug(f"Log directory: {LOG_FILE}")
 
-    # Redirect print và stderr ra file
-    sys.stdout = open(LOG_FILE, "a+", buffering=1)
-    sys.stderr = open(LOG_FILE, "a+", buffering=1)
+#     # Redirect print và stderr ra file
+#     sys.stdout = open(LOG_FILE, "a+", buffering=1)
+#     sys.stderr = open(LOG_FILE, "a+", buffering=1)
 
-    LOGGING = {
-        "version": 1,
-        "disable_existing_loggers": False,
-        "formatters": {
-            "verbose": {
-                "format": "[{levelname}] {asctime} {name}:{lineno} - {message}",
-                "style": "{",
-            },
-        },
-        "handlers": {
-            "app_file": {
-                "class": "logging.handlers.RotatingFileHandler",
-                "level": "DEBUG",
-                "filename": "/var/log/sideline/app.log",
-                "formatter": "verbose",
-                "maxBytes": 10 * 1024 * 1024,
-                "backupCount": 5,
-                "delay": True,
-            },
-            "console": {
-                "class": "logging.StreamHandler",
-                "formatter": "verbose",
-            },
-            "celery_file": {
-                "class": "logging.handlers.RotatingFileHandler",
-                "level": "INFO",
-                "filename": "/var/log/sideline/celery.log",
-                "formatter": "verbose",
-                "maxBytes": 10 * 1024 * 1024,
-                "backupCount": 5,
-                "delay": True,
-            }
-        },
-        "root": {
-            "handlers": ["app_file", "console"],
-            "level": "DEBUG",
-        },
-        "loggers": {
-            "django.request": {
-                "handlers": ["app_file", "console"],
-                "level": "INFO",
-                "propagate": False,
-            },
-            "celery": {
-                "handlers": ["celery_file"],
-                "level": "INFO",
-                "propagate": False,
-            },
-        },
-    }
+#     LOGGING = {
+#         "version": 1,
+#         "disable_existing_loggers": False,
+#         "formatters": {
+#             "verbose": {
+#                 "format": "[{levelname}] {asctime} {name}:{lineno} - {message}",
+#                 "style": "{",
+#             },
+#         },
+#         "handlers": {
+#             "app_file": {
+#                 "class": "logging.handlers.RotatingFileHandler",
+#                 "level": "DEBUG",
+#                 "filename": "/var/log/sideline/app.log",
+#                 "formatter": "verbose",
+#                 "maxBytes": 10 * 1024 * 1024,
+#                 "backupCount": 5,
+#                 "delay": True,
+#             },
+#             "console": {
+#                 "class": "logging.StreamHandler",
+#                 "formatter": "verbose",
+#             },
+#             "celery_file": {
+#                 "class": "logging.handlers.RotatingFileHandler",
+#                 "level": "INFO",
+#                 "filename": "/var/log/sideline/celery.log",
+#                 "formatter": "verbose",
+#                 "maxBytes": 10 * 1024 * 1024,
+#                 "backupCount": 5,
+#                 "delay": True,
+#             }
+#         },
+#         "root": {
+#             "handlers": ["app_file", "console"],
+#             "level": "DEBUG",
+#         },
+#         "loggers": {
+#             "django.request": {
+#                 "handlers": ["app_file", "console"],
+#                 "level": "INFO",
+#                 "propagate": False,
+#             },
+#             "celery": {
+#                 "handlers": ["celery_file"],
+#                 "level": "INFO",
+#                 "propagate": False,
+#             },
+#         },
+#     }
 # -------------------------------------------------------
 
 # ✅ Cho phép gửi cookie / header Authorization

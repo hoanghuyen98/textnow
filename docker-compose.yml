@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   db:
-    image: postgres:15
+    image: postgres:15-alpine
     container_name: sideline_db
     volumes:
       - postgres_data:/var/lib/postgresql/data
@@ -14,12 +14,16 @@ services:
       - "5432:5432"
     restart: always
 
+  # Thêm Redis làm Message Broker cho Celery
+  redis:
+    image: redis:7-alpine
+    container_name: sideline_redis
+    restart: always
+
   web:
     image: 01646083113/sideline-backend:v1.0.0
     container_name: sideline_web
-    build: .
-    volumes:
-      - .:/app
+    # Trên server, ta dùng trực tiếp image đã build, không cần build lại hay mount code
     ports:
       - "8000:8000"
     environment:
@@ -29,9 +33,38 @@ services:
       - DB_PASSWORD=${DB_PASSWORD}
       - DB_HOST=db
       - DB_PORT=5432
-      - DEBUG=True
+      - REDIS_URL=redis://redis:6379/0
+      - DEBUG=False
     depends_on:
       - db
+      - redis
+    restart: always
+
+  # Container chuyên chạy tác vụ ngầm
+  celery_worker:
+    image: 01646083113/sideline-backend:v1.0.0
+    container_name: sideline_worker
+    command: celery -A sideline worker -l info
+    environment:
+      - DB_NAME=${DB_NAME}
+      - DB_USER=${DB_USER}
+      - DB_PASSWORD=${DB_PASSWORD}
+      - DB_HOST=db
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - db
+      - redis
+    restart: always
+
+  # Container chuyên chạy tác vụ định kỳ (nếu Huyền có dùng Task Schedule)
+  celery_beat:
+    image: 01646083113/sideline-backend:v1.0.0
+    container_name: sideline_beat
+    command: celery -A sideline beat -l info
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+    depends_on:
+      - redis
     restart: always
 
 volumes:
