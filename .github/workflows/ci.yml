@@ -12,9 +12,10 @@ jobs:
       postgres:
         image: postgres:15
         env:
-          POSTGRES_DB: ${{ secrets.DB_NAME }}
-          POSTGRES_USER: ${{ secrets.DB_USER }}
-          POSTGRES_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          env:
+          POSTGRES_DB: test_db
+          POSTGRES_USER: test_user
+          POSTGRES_PASSWORD: test_pass
         ports:
           - 5432:5432
         options: >-
@@ -32,16 +33,13 @@ jobs:
       - name: Install Poetry
         uses: snok/install-poetry@v1
       - name: Install deps
-        run: |
-          # Thêm lệnh này để đồng bộ lại file lock trước khi cài đặt
-          poetry lock
-          poetry install --no-root
+        run: poetry install --no-root
       - name: Run Tests
         env:
           DB_ENGINE: django.db.backends.postgresql
-          DB_NAME: ${{ secrets.DB_NAME }}
-          DB_USER: ${{ secrets.DB_USER }}
-          DB_PASSWORD: ${{ secrets.DB_PASSWORD }}
+          DB_NAME: test_db
+          DB_USER: test_user
+          DB_PASSWORD: test_pass
           DB_HOST: localhost
           DB_PORT: 5432
           DEBUG: "False"
