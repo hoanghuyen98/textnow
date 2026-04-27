@@ -1,0 +1,42 @@
+name: Deploy
+
+on:
+  workflow_dispatch:
+
+jobs:
+  deploy:
+    runs-on: ubuntu-latest
+    environment: env
+    steps:
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            PROJECT_DIR="/root/green_sideline"
+            REPO_URL="git@github.com:${{ github.repository }}.git"
+
+            if [ ! -d "$PROJECT_DIR" ]; then
+              echo "Folder chưa tồn tại. Đang tiến hành clone..."
+              git clone $REPO_URL $PROJECT_DIR
+            fi
+
+            cd $PROJECT_DIR
+            git pull origin main
+
+            echo "DEBUG=False" > .env
+            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
+            echo "PG_DB=${{ secrets.DB_NAME }}" >> .env
+            echo "PG_USERNAME=${{ secrets.DB_USER }}" >> .env
+            echo "PG_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "PG_HOST=db" >> .env
+            echo "PG_PORT=5432" >> .env
+            echo "REDIS_URL=redis://redis:6379/0" >> .env
+
+            docker compose pull
+            docker compose up -d --force-recreate
+            docker compose exec -T web python manage.py migrate
+            docker compose exec -T web python manage.py collectstatic --noinput
+            docker image prune -f

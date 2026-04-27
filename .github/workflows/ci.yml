@@ -3,6 +3,7 @@ name: CI/CD Docker Pipeline
 on:
   push:
     branches: [ "**" ]
+  workflow_dispatch:
 
 concurrency:
   group: ${{ github.workflow }}-${{ github.ref }}
@@ -49,6 +50,7 @@ jobs:
           DEBUG: "False"
           SECRET_KEY: "test-secret-key"
         run: |
+          touch .env
           poetry run python manage.py migrate
           poetry run python manage.py test app
 
@@ -86,52 +88,3 @@ jobs:
         with:
           push: true
           tags: 01646083113/sideline-backend:v1.0.0
-
-  deploy:
-    needs: push
-    if: github.ref == 'refs/heads/main'
-    runs-on: ubuntu-latest
-    environment: env
-    steps:
-      - name: Deploy via SSH
-        uses: appleboy/ssh-action@v1.0.3
-        with:
-          host: ${{ vars.SSH_HOST }}
-          username: ${{ vars.SSH_USER }}
-          key: ${{ secrets.SSH_KEY }}
-          script: |
-            PROJECT_DIR="/root/green_sideline"
-            REPO_URL="git@github.com:${{ github.repository }}.git"
-
-            # 1. Kiểm tra và Clone repo
-            if [ ! -d "$PROJECT_DIR" ]; then
-              echo "Folder chưa tồn tại. Đang tiến hành clone..."
-              git clone $REPO_URL $PROJECT_DIR
-            fi
-            
-            cd $PROJECT_DIR
-            git pull origin main
-
-            # 2. Tự động tạo/cập nhật file .env từ GitHub Secrets
-            # Dấu > để ghi mới, >> để viết tiếp vào cuối file
-            echo "DEBUG=False" > .env
-            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
-            echo "PG_DB=${{ secrets.DB_NAME }}" >> .env        # ← đổi thành PG_*
-            echo "PG_USERNAME=${{ secrets.DB_USER }}" >> .env
-            echo "PG_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-            echo "PG_HOST=db" >> .env
-            echo "PG_PORT=5432" >> .env
-            echo "REDIS_URL=redis://redis:6379/0" >> .env
-
-            # 3. Kéo Image mới nhất và khởi động lại các container
-            # Dùng 'docker compose pull' để lấy cả web và worker (nếu có)
-            docker compose pull
-            docker compose up -d --force-recreate
-            
-            # 4. Thực hiện các lệnh quản trị Django bên trong container web
-            # Thêm -T để chạy lệnh trong môi trường không có terminal (CI/CD)
-            docker compose exec -T web python manage.py migrate
-            docker compose exec -T web python manage.py collectstatic --noinput
-            
-            # 5. Dọn dẹp các Image cũ để tránh đầy ổ cứng server
-            docker image prune -f
