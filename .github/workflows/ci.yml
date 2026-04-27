@@ -34,7 +34,7 @@ jobs:
       - name: Install deps
         run: |
           # Thêm lệnh này để đồng bộ lại file lock trước khi cài đặt
-          poetry lock --no-update 
+          poetry lock
           poetry install --no-root
       - name: Run Tests
         env:
@@ -88,23 +88,36 @@ jobs:
             PROJECT_DIR="/root/green_sideline"
             REPO_URL="git@github.com:${{ github.repository }}.git"
 
-            # 1. Kiểm tra nếu thư mục chưa có thì clone về
+            # 1. Kiểm tra và Clone repo
             if [ ! -d "$PROJECT_DIR" ]; then
               echo "Folder chưa tồn tại. Đang tiến hành clone..."
               git clone $REPO_URL $PROJECT_DIR
             fi
             
-            # 2. Di chuyển vào thư mục và cập nhật code
             cd $PROJECT_DIR
             git pull origin main
-            
-            # 3. Triển khai Docker (Lấy image v1.0.0 đã build ở bước trước)
-            docker compose pull web
+
+            # 2. Tự động tạo/cập nhật file .env từ GitHub Secrets
+            # Dấu > để ghi mới, >> để viết tiếp vào cuối file
+            echo "DEBUG=False" > .env
+            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
+            echo "DB_ENGINE=django.db.backends.postgresql" >> .env
+            echo "DB_NAME=${{ secrets.DB_NAME }}" >> .env
+            echo "DB_USER=${{ secrets.DB_USER }}" >> .env
+            echo "DB_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "DB_HOST=db" >> .env
+            echo "DB_PORT=5432" >> .env
+            echo "REDIS_URL=redis://redis:6379/0" >> .env
+
+            # 3. Kéo Image mới nhất và khởi động lại các container
+            # Dùng 'docker compose pull' để lấy cả web và worker (nếu có)
+            docker compose pull
             docker compose up -d
             
-            # 4. Chạy các lệnh Django
+            # 4. Thực hiện các lệnh quản trị Django bên trong container web
+            # Thêm -T để chạy lệnh trong môi trường không có terminal (CI/CD)
             docker compose exec -T web python manage.py migrate
             docker compose exec -T web python manage.py collectstatic --noinput
             
-            # 5. Dọn dẹp
+            # 5. Dọn dẹp các Image cũ để tránh đầy ổ cứng server
             docker image prune -f
