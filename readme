@@ -32,7 +32,8 @@ poetry run python manage.py runserver
 ## Run with Docker
 
 ```bash
-docker compose up --build
+docker compose pull
+docker compose up -d --force-recreate
 ```
 
 -- Build

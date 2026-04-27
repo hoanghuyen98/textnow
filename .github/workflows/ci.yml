@@ -112,7 +112,7 @@ jobs:
             # 3. Kéo Image mới nhất và khởi động lại các container
             # Dùng 'docker compose pull' để lấy cả web và worker (nếu có)
             docker compose pull
-            docker compose up -d
+            docker compose up -d --force-recreate
             
             # 4. Thực hiện các lệnh quản trị Django bên trong container web
             # Thêm -T để chạy lệnh trong môi trường không có terminal (CI/CD)
