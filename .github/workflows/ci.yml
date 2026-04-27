@@ -34,7 +34,7 @@ jobs:
         uses: snok/install-poetry@v1
       - name: Install deps
         run: |
-          poetry lock --no-update
+          poetry lock
           poetry install --no-root
       - name: Run Tests
         env:
