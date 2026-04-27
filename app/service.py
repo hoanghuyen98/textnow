@@ -130,54 +130,77 @@ def fetch_categories(provider: str):
 
     elif provider == "dongvan":
         items = data.get("data") or []
-        result.extend([
-            {
-                "id": int(item["id"]),
-                "name": f"{item.get('name')} ({item.get('price')})",
-                "price": item.get("price"),
+        for item in items:
+            if not str(item.get("id", "")).isdigit():
+                continue
+            item_id = int(item["id"])
+            if item_id not in (1, 2):
+                continue
+            name = item.get("name") or ""
+            price = item.get("price") or ""
+            result.append({
+                "id": item_id,
+                "name": f"{name} ({price})" if price else name,
+                "price": price,
                 "amount": item.get("quality"),
-            }
-            for item in items
-            if str(item.get("id", "")).isdigit() and int(item["id"]) in (1, 2)
-        ])
+            })
 
     elif provider == "muaview":
         items = data.get("data") or []
-        print("items: ", items)
-        result.extend([
-            {
-                "id": int(item["id"]),
-                "name": f"{item['name']} ({item['price']})",
-                "price": item["price"],
-            }
-            for item in items
-        ])
+        allowed_ids = {15, 16}
+        for item in items:
+            try:
+                item_id = int(item["id"])
+            except (KeyError, ValueError, TypeError):
+                continue
+            if item_id not in allowed_ids:
+                continue
+            try:
+                result.append({
+                    "id": item_id,
+                    "name": f"{item['name']} ({item['price']})",
+                    "price": item["price"],
+                })
+            except (KeyError, TypeError):
+                continue
 
     elif provider == "muaview_that":
         items = data.get("data") or []
         allowed_ids = {64}
-        result.extend([
-            {
-                "id": int(item["id"]),
-                "name": f"{item['name']} ({item['price']})",
-                "price": item["price"],
-            }
-            for item in items
-            if int(item.get("id", -1)) in allowed_ids
-        ])
+        for item in items:
+            try:
+                item_id = int(item.get("id", -1))
+            except (ValueError, TypeError):
+                continue
+            if item_id not in allowed_ids:
+                continue
+            try:
+                result.append({
+                    "id": item_id,
+                    "name": f"{item['name']} ({item['price']})",
+                    "price": item["price"],
+                })
+            except (KeyError, TypeError):
+                continue
 
     elif provider == "shopgmail":
         items = data.get("data") or []
         allowed_ids = {155}
-        result.extend([
-            {
-                "id": int(item["id"]),
-                "name": f"{item['name']} ({item['price']})",
-                "price": item["price"],
-            }
-            for item in items
-            if int(item.get("id", -1)) in allowed_ids
-        ])
+        for item in items:
+            try:
+                item_id = int(item.get("id", -1))
+            except (ValueError, TypeError):
+                continue
+            if item_id not in allowed_ids:
+                continue
+            try:
+                result.append({
+                    "id": item_id,
+                    "name": f"{item['name']} ({item['price']})",
+                    "price": item["price"],
+                })
+            except (KeyError, TypeError):
+                continue
 
     return {"status": "success", "provider": provider, "count": len(result), "data": result}
 
