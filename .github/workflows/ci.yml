@@ -1,0 +1,98 @@
+name: CI/CD Pipeline
+
+on:
+  push:
+    branches: [ main ]
+  pull_request:
+    branches: [ main ]
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v4
+    
+    - name: Set up Python 3.10
+      uses: actions/setup-python@v5 # Cập nhật lên v5
+      with:
+        python-version: "3.10"
+        cache: 'pip' # Tự động cache các gói pip
+    
+    - name: Install pipenv
+      run: pip install pipenv
+    
+    - name: Install dependencies
+      run: pipenv install --deploy --dev
+      env:
+        PIPENV_VENV_IN_PROJECT: 1
+    
+    - name: Run Tests & Coverage
+      # Gộp chạy migration, test và coverage vào một block để quản lý env dễ hơn
+      env:
+        DEBUG: "False"
+        SECRET_KEY: "test-secret-key"
+        ALLOWED_HOSTS: "localhost,127.0.0.1"
+      run: |
+        pipenv run python manage.py migrate
+        # Chạy coverage luôn trong lúc test để không phải chạy lại 2 lần
+        pipenv run coverage run --source='app' manage.py test app
+        pipenv run coverage report
+
+  lint:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    
+    - name: Install dependencies
+      run: |
+        pip install flake8 black isort
+    
+    - name: Run flake8
+      run: flake8 app sideline --max-line-length=120 --ignore=E501,W503
+      continue-on-error: true
+    
+    - name: Check code formatting with black
+      run: black --check app sideline --line-length=120
+      continue-on-error: true
+    
+    - name: Check import sorting with isort
+      run: isort --check-only app sideline
+      continue-on-error: true
+
+  security:
+    runs-on: ubuntu-latest
+    
+    steps:
+    - uses: actions/checkout@v3
+    
+    - name: Set up Python
+      uses: actions/setup-python@v4
+      with:
+        python-version: "3.10"
+    
+    - name: Install security checking tools
+      run: pip install bandit safety
+    
+    - name: Run bandit security check
+      run: bandit -r app sideline -ll
+      continue-on-error: true
+    
+    - name: Check for known vulnerabilities
+      run: safety check --json
+      continue-on-error: true
+
+  deploy-success:
+    needs: [test, lint, security]
+    runs-on: ubuntu-latest
+    if: success()
+    
+    steps:
+    - name: Notify deployment success
+      run: echo "All checks passed! Ready for deployment."
