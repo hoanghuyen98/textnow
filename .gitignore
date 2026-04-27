@@ -49,8 +49,6 @@ Pipfile.lock
 # ========================================
 # 🐳 DOCKER / DEPLOY
 # ========================================
-Dockerfile
-docker-compose.yml
 *.pid
 *.seed
 *.tar
