@@ -138,6 +138,7 @@ jobs:
             echo "MUAVIEW_KEY=${{ vars.MUAVIEW_KEY }}" >> .env
             echo "SELLMMO_KEY=${{ vars.SELLMMO_KEY }}" >> .env
             echo "SHOPGMAIL_KEY=${{ vars.SHOPGMAIL_KEY }}" >> .env
+            echo "PROXY_US=${{ vars.PROXY_US }}" >> .env
             echo "PG_HOST=db" >> .env
             echo "PG_PORT=5432" >> .env
             echo "REDIS_URL=redis://redis:6379/0" >> .env
