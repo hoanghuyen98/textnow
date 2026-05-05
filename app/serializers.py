@@ -334,7 +334,7 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
 
         logger.debug(available_phones)
         for phone in available_phones:
-            print(f"[PYTHON] Phone {phone.phone} - is_used={phone.is_used} - customer={phone.customer_id}")
+            logger.debug(f"Phone {phone.phone} - is_used={phone.is_used} - customer={phone.customer_id}")
 
         if len(available_phones) < phone_count:
             return {
@@ -347,7 +347,6 @@ class CustomerAutoCreateSerializer(serializers.Serializer):
 
         for phone in available_phones:
             phone.is_used = True
-            print("phone_is_used: ", phone.is_used)
             phone.date_use = now
             phone.save()
 

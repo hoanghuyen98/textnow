@@ -847,7 +847,7 @@ class CreatePhoneAccountView(APIView):
                 creator=employee,
                 purchased_mail=purchased_mail
             )
-            print("phone_obj: ", phone_obj.name)
+            logger.info(f"phone_obj: {phone_obj.name}")
             task = process_phoneaccount_background.delay(phone_obj.name)
 
             return Response({
@@ -896,7 +896,7 @@ class RefreshInboxView(APIView):
             )
 
         if obj.status != "live":
-            print("so dien thoai die roi:(())")
+            logger.warning(f"Phone {obj.phone} không live, lấy từ cache")
             redis_key = f"message_history:{obj.phone}"
             raw = cache.get(redis_key)
 
@@ -914,12 +914,11 @@ class RefreshInboxView(APIView):
                     status=status.HTTP_400_BAD_REQUEST
                 )
 
-            print('raw_result:', raw_result)
+            logger.debug(f"raw_result: {raw_result}")
 
         else:
             # --- Call cURL ---
             raw_result = run_curl(obj.batch)
-            print('raw_result; ', raw_result)
             if raw_result.get("status") == "error":
                 obj.status = "die_use"
                 obj.save(update_fields=["status"])
@@ -1271,7 +1270,6 @@ class BuyMailView(APIView):
     def post(self, request):
         user = getattr(request.user, "employee_profile", None)
         provider = request.data.get("provider", "").lower().strip()
-        print("provider: ", provider)
         logger.info(f"provider: {provider}")
         if not provider:
             return Response(
@@ -1280,7 +1278,7 @@ class BuyMailView(APIView):
             )
         
         product_name = request.data.get("product_name", "").split("(")[0].strip()
-        print('product_name: ', product_name)
+        logger.info(f"product_name: {product_name}")
 
         product_id = request.data.get("product_id")
         if not product_id:
@@ -1300,19 +1298,13 @@ class BuyMailView(APIView):
             elif provider == "dongvan":
                 result = buy_mail_dongvan(employee=user, account_type=product_id, quality=quality)
             elif provider == "muaview":
-                print("------------------------")
                 result = buy_mail_muaview(employee=user, service_id=product_id, quality=quality)
-                print(result)
                 logger.info(f"dd: {result}")
             elif provider == "muaview_that":
-                print("------------------------")
                 result = buy_mail_muaview_that(employee=user, service_id=product_name, quality=quality)
-                print(result)
                 logger.info(f"dd: {result}")
             elif provider == "shopgmail":
-                print("------------------------")
                 result = buy_mail_shopgmail(employee=user, service_id=product_name, quality=quality)
-                print(result)
                 logger.info(f"dd: {result}")
             else:
                 return Response(
@@ -2046,10 +2038,7 @@ class TaskStatusView(APIView):
 
     def get(self, request, task_id):
         result = AsyncResult(task_id)
-        print("status: ", result.status)
-        print("result: ", result.result)
-        print("traceback: ", result.traceback)
-        print('task_id: ', task_id)
+        logger.info(f"task_id={task_id} status={result.status} result={result.result} traceback={result.traceback}")
 
         if result.state == "PENDING":
             return Response({"status": "pending"})
@@ -2089,3 +2078,31 @@ class ProxySettingView(APIView):
         obj.proxy_us = proxy_us
         obj.save()
         return Response({"status": "success", "proxy_us": obj.proxy_us, "updated_at": obj.updated_at})
+
+
+class ProxySettingTestView(APIView):
+    permission_classes = [IsAuthenticated, RoleRequiredPermission]
+    allowed_roles = ["admin"]
+
+    def post(self, request):
+        from .utils import get_proxy
+        proxy_us = get_proxy()
+        if not proxy_us:
+            return Response({"status": "error", "message": "Chưa cấu hình proxy."}, status=400)
+
+        try:
+            resp = requests.get(
+                "https://ipinfo.io/json",
+                proxies={"http": proxy_us, "https": proxy_us},
+                timeout=10
+            )
+            data = resp.json()
+            return Response({
+                "status": "success",
+                "ip": data.get("ip"),
+                "country": data.get("country"),
+                "org": data.get("org"),
+                "proxy_used": proxy_us,
+            })
+        except Exception as e:
+            return Response({"status": "error", "message": str(e)}, status=502)

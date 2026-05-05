@@ -385,8 +385,6 @@ def buy_mail_muaview_that(employee, service_id, quality: int = 1):
     )
 
     for i in range(quality):
-        print("------------i: ", i)
-
         params = {
             "apikey": conf["key"],
             "service": service_id
@@ -618,8 +616,7 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
     - Giữ nguyên format response legacy
     """
 
-    print("provider: ", provider)
-    print("")
+    logger.info(f"provider: {provider}")
     # =============== MUAVIEW (client_id = order_id) =================
     if provider == "muaview":
         url = API_CONFIG["muaview"]["base_url"] + API_CONFIG["muaview"]["endpoints"]["otp"]
