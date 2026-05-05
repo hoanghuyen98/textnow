@@ -55,6 +55,7 @@ urlpatterns = [
 
     # cài đặt hệ thống
     path("proxy_setting/", views.ProxySettingView.as_view(), name="proxy_setting"),
+    path("proxy_setting/test/", views.ProxySettingTestView.as_view(), name="proxy_setting_test"),
 
     # thống kê
     path("report_by_employee/", views.PhoneReportByEmployeeView.as_view()),

@@ -294,7 +294,6 @@ def run_curl_with_retry(batch_cmd: str, retries: int = 2, delay: float = 1.0):
     Nếu bất kỳ lần nào trả về status < 400 → coi như live.
     Nếu lỗi hoặc status >= 400 → thử lại tối đa 3 lần.
     """
-    print("??????????????????")
     for attempt in range(1, retries + 1):
         try:
             result = run_curl(batch_cmd)
