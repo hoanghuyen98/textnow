@@ -149,3 +149,27 @@ jobs:
             docker compose exec -T web python manage.py migrate
             docker compose exec -T web python manage.py collectstatic --noinput
             docker image prune -f
+
+  notification:
+      name: Notify Telegram
+      needs: [check, deploy]
+      runs-on: ubuntu-latest
+      if: always() # Chạy ngay cả khi deploy thất bại
+      steps:
+        - name: Send Notification
+          uses: appleboy/telegram-action@master
+          with:
+            to: ${{ vars.TELEGRAM_TO }}
+            token: ${{ secrets.TELEGRAM_TOKEN }}
+            format: markdown
+            message: |
+              *🚀 Thông báo Deploy - Sideline Backend*
+              
+              *Người thực hiện:* `${{ github.actor }}`
+              *Target:* `${{ github.event.inputs.target }}`
+              
+              *Kết quả:*
+              - Check Server: ${{ needs.check.result == 'success' && '✅' || '❌' }}
+              - Deploy Jobs: ${{ needs.deploy.result == 'success' && '✅ Thành công' || '⚠️ Có lỗi/Bỏ qua' }}
+              
+              *Chi tiết:* [GitHub Action Log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
