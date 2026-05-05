@@ -151,8 +151,6 @@ jobs:
             docker compose pull
             docker compose down
             docker compose up -d
-            docker compose exec -T web python manage.py migrate
-            docker compose exec -T web python manage.py collectstatic --noinput
             docker image prune -f
 
   notification:
