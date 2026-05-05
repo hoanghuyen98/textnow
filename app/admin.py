@@ -13,6 +13,7 @@ from .models import (
     TextNowAccount,
     AppleMailProxy,
     CustomerAssignHistory,
+    ProxySetting,
 )
 
 
@@ -337,3 +338,12 @@ class CustomerAssignHistoryAdmin(BaseExportAdmin):
     search_fields = ("creator__username",)
 
     ordering = ("-created_at",)
+
+
+# ==============================
+# PROXY SETTING
+# ==============================
+@admin.register(ProxySetting)
+class ProxySettingAdmin(admin.ModelAdmin):
+    list_display = ("id", "proxy_us", "updated_at")
+    readonly_fields = ("updated_at",)

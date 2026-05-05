@@ -13,7 +13,7 @@ from rest_framework.response import Response
 from django.db.models import Count, Q, OuterRef, Subquery, Min
 from rest_framework.decorators import api_view, permission_classes
 import base64
-from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer, MailTransaction, AppleMailProxy, CustomerAssignHistory, MessageHistoryLog
+from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer, MailTransaction, AppleMailProxy, CustomerAssignHistory, MessageHistoryLog, ProxySetting
 from rest_framework.permissions import IsAuthenticated, AllowAny
 from .utils import run_curl, parse_curl, strip_proxy, send_pinger_message, normalize_phone_number, parse_time, to_utc_isoformat, run_curl_with_retry, upload_pinger_media
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
@@ -1231,22 +1231,16 @@ class MailCategoriesView(APIView):
             )
 
         provider = provider.lower().strip()
-        try:
-            result = fetch_categories(provider)
-        except ValueError as e:
-            return Response(
-                {"status": "error", "message": str(e)},
-                status=status.HTTP_400_BAD_REQUEST
-            )
+        result = fetch_categories(provider)
 
         if result.get("status") == "error":
             return Response(
-                {"status": "error", "message": result.get("message", "Không thể lấy danh sách mail.")},
+                {"status": "error", "message": result.get("error", "Không thể lấy danh sách mail.")},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         if result.get("status") == "success":
             return Response(
-                {"status": "success", "provider": provider, "categories": result.get("data", [])},
+                {"status": "success", "provider": provider, "categories": result.get("categories", result)},
                 status=status.HTTP_200_OK
             )
 
@@ -2079,3 +2073,19 @@ class TaskStatusView(APIView):
 
 def healthz(request):
     return HttpResponse("OK")
+
+
+class ProxySettingView(APIView):
+    permission_classes = [IsAuthenticated, RoleRequiredPermission]
+    allowed_roles = ["admin"]
+
+    def get(self, request):
+        obj, _ = ProxySetting.objects.get_or_create(pk=1, defaults={"proxy_us": ""})
+        return Response({"status": "success", "proxy_us": obj.proxy_us, "updated_at": obj.updated_at})
+
+    def put(self, request):
+        proxy_us = request.data.get("proxy_us", "")
+        obj, _ = ProxySetting.objects.get_or_create(pk=1, defaults={"proxy_us": ""})
+        obj.proxy_us = proxy_us
+        obj.save()
+        return Response({"status": "success", "proxy_us": obj.proxy_us, "updated_at": obj.updated_at})

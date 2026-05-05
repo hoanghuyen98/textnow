@@ -5,9 +5,12 @@ from bs4 import BeautifulSoup
 import subprocess
 import os
 
-PROXY_US = os.environ.get('PROXY_US')
-logger.info(f"PROXY_US: {'SET (' + PROXY_US[:20] + '...)' if PROXY_US else 'NOT SET'}")
-
+def get_proxy() -> str:
+    try:
+        from .models import ProxySetting
+        return ProxySetting.get_proxy()
+    except Exception:
+        return os.environ.get('PROXY_US', '') or ''
 try:
     import curlconverter
     HAS_CONVERTER = True
@@ -178,16 +181,17 @@ def parse_curl(c):
 
 
 def run_curl(curl_text):
+    proxy_us = get_proxy()
     # Thay thế proxy trong curl
-    curl_text = replace_proxy(curl_text, PROXY_US)
+    curl_text = replace_proxy(curl_text, proxy_us)
     # Parse curl
     p = parse_curl(curl_text)
     if not p["url"]:
         return {"error": "No URL found"}
 
     proxy = {
-        "http": PROXY_US,
-        "https": PROXY_US,
+        "http": proxy_us,
+        "https": proxy_us,
     }
     logger.info('-----------------')
     logger.info(proxy)
@@ -353,8 +357,9 @@ def send_pinger_message(
     Gửi tin nhắn qua API Pinger bằng CURL mẫu nhưng override proxy.
     """
 
+    proxy_us = get_proxy()
     # 1) Thay proxy trong curl = proxy của bạn
-    message_curl = replace_proxy(message_curl, PROXY_US)
+    message_curl = replace_proxy(message_curl, proxy_us)
 
     # 2) Parse curl (headers, url, body)
     parsed = parse_curl(message_curl)
@@ -385,8 +390,8 @@ def send_pinger_message(
 
     # 5) Proxy config (luôn dùng proxy của bạn)
     proxy_cfg = {
-        "http": PROXY_US,
-        "https": PROXY_US,
+        "http": proxy_us,
+        "https": proxy_us,
     }
 
     # 6) Gửi request thật
@@ -443,9 +448,9 @@ def upload_pinger_media(curl_text: str, file):
     """
     Upload ảnh qua Pinger Media API bằng cURL mẫu + override proxy.
     """
-
+    proxy_us = get_proxy()
     # 1) Thay proxy trong curl
-    curl_text = replace_proxy(curl_text, PROXY_US)
+    curl_text = replace_proxy(curl_text, proxy_us)
 
     # 2) Parse curl
     parsed = parse_curl(curl_text)
@@ -465,7 +470,7 @@ def upload_pinger_media(curl_text: str, file):
     for h in ["Accept-Encoding", "Transfer-Encoding", "Content-Length"]:
         headers.pop(h, None)
 
-    proxy_cfg = {"http": PROXY_US, "https": PROXY_US}
+    proxy_cfg = {"http": proxy_us, "https": proxy_us}
 
     # 4) Upload file
     try:

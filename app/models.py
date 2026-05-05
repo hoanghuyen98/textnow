@@ -263,3 +263,21 @@ class TextNowAccount(models.Model):
 
     def __str__(self):
         return f"{self.email}"
+
+
+class ProxySetting(models.Model):
+    proxy_us = models.CharField(max_length=500, blank=True, default='')
+    updated_at = models.DateTimeField(auto_now=True)
+
+    class Meta:
+        db_table = "proxy_setting"
+        verbose_name = "Proxy Setting"
+
+    def save(self, *args, **kwargs):
+        self.pk = 1
+        super().save(*args, **kwargs)
+
+    @classmethod
+    def get_proxy(cls):
+        obj, _ = cls.objects.get_or_create(pk=1, defaults={"proxy_us": ""})
+        return obj.proxy_us or ""

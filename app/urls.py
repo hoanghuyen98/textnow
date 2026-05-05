@@ -53,6 +53,9 @@ urlpatterns = [
     path("save_apple_mail/", views.SaveAppleMailView.as_view(), name="save_apple_mail"),
     path("save_textnow/", views.SaveTextNowAccountView.as_view(), name="save_textnow"),
 
+    # cài đặt hệ thống
+    path("proxy_setting/", views.ProxySettingView.as_view(), name="proxy_setting"),
+
     # thống kê
     path("report_by_employee/", views.PhoneReportByEmployeeView.as_view()),
     path("report_by_group/", views.PhoneReportByGroupView.as_view()),

@@ -16,8 +16,8 @@ def debug_task(self):
 
 
 app.conf.beat_schedule = {
-    "check-phone-batches-every-10-min": {
-        "task": "app.tasks.check_phone_all_batches",   # Đường dẫn đến task
-        "schedule": 1800, 
+    "check-phone-batches-every-30-min": {
+        "task": "app.tasks.check_phone_all_batches",
+        "schedule": 1800,
     },
 }
