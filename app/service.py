@@ -102,7 +102,7 @@ def fetch_categories(provider: str):
 
     resp = None
     try:
-        resp = requests.get(url, params=params, timeout=10, proxies=proxies, verify=False)
+        resp = requests.get(url, params=params, timeout=10, proxies=proxies, verify=False)  # nosec B501 - proxy yêu cầu tắt SSL verify
         if not resp.text.strip():
             logger.error(f"[{provider}] API trả về response rỗng, status_code={resp.status_code}, url={url}")
             return {"status": "error", "message": f"API {provider} trả về response rỗng (status {resp.status_code})"}
