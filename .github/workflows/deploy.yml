@@ -6,11 +6,12 @@ on:
       environment:
         description: 'Chọn env để ứng với server'
         required: true
-        default: 'env'
+        default: 'all'
         type: choice
         options:
           - env
           - env_2.24.71.55
+          - all
 
 jobs:
   deploy:
