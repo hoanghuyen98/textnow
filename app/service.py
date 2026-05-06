@@ -100,8 +100,9 @@ def fetch_categories(provider: str):
     proxy_us = get_proxy()
     proxies = {"http": proxy_us, "https": proxy_us} if proxy_us else None
 
+    resp = None
     try:
-        resp = requests.get(url, params=params, timeout=10, proxies=proxies)
+        resp = requests.get(url, params=params, timeout=10, proxies=proxies, verify=False)
         if not resp.text.strip():
             logger.error(f"[{provider}] API trả về response rỗng, status_code={resp.status_code}, url={url}")
             return {"status": "error", "message": f"API {provider} trả về response rỗng (status {resp.status_code})"}
