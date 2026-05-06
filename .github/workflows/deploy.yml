@@ -1,4 +1,4 @@
-name: Deploy
+name: Deploy Backend
 
 on:
   workflow_dispatch:
@@ -9,17 +9,18 @@ on:
         default: 'all'
         type: choice
         options:
+          - all
           - env
           - env_2.24.71.55
-          - all
 
 jobs:
-  deploy:
-    name: Deploy to ${{ github.event.inputs.environment }}
+  deploy-env:
+    name: Deploy to env
+    if: |
+      github.event.inputs.environment == 'all' ||
+      github.event.inputs.environment == 'env'
     runs-on: ubuntu-latest
-    environment:
-      name: ${{ github.event.inputs.environment }}
-      url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
+    environment: env
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
@@ -44,7 +45,6 @@ jobs:
             cd $PROJECT_DIR
             git pull origin main
 
-            # Ghi file .env
             cat <<EOF > .env
             DEBUG=False
             SECRET_KEY=${{ secrets.SECRET_KEY }}
@@ -61,34 +61,131 @@ jobs:
             docker compose up -d
             docker image prune -f
 
-  notification:
-      name: Notify Telegram
-      needs: deploy
-      runs-on: ubuntu-latest
-      if: always()
-      environment: ${{ github.event.inputs.environment }}
-      steps:
-        - name: Get Short Info
-          id: info
-          run: |
-            # Lấy 7 ký tự đầu của SHA
-            echo "sha_short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
-            # Lấy dòng đầu tiên của commit message
-            echo "commit_msg=$(git log -1 --pretty=format:'%s')" >> $GITHUB_OUTPUT
+  notify-env:
+    name: Notify Telegram (env)
+    needs: deploy-env
+    if: always() && (github.event.inputs.environment == 'all' || github.event.inputs.environment == 'env')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
 
-        - name: Send Notification
-          uses: appleboy/telegram-action@master
-          with:
-            to: ${{ vars.TELEGRAM_TO }}
-            token: ${{ secrets.TELEGRAM_TOKEN }}
-            format: markdown
-            message: |
-              *🚀 Thông báo Deploy - Sideline Backend*
-              
-              🌍 *Môi trường:* `${{ github.event.inputs.environment }}`
-              📊 *Trạng thái:* `${{ needs.deploy.result == 'success' && '✅ Thành công' || '❌ Thất bại' }}`
-              📝 *Message:* `${{ steps.info.outputs.commit_msg }}`
-              🆔 *Commit:* `${{ steps.info.outputs.sha_short }}`
-              👤 *By:* `${{ github.actor }}`
-              
-              *Chi tiết:* [GitHub Action Log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+      - name: Set status
+        id: status
+        run: |
+          if [ "${{ needs.deploy-env.result }}" == "success" ]; then
+            echo "text=✅ Thành công" >> $GITHUB_OUTPUT
+          else
+            echo "text=❌ Thất bại" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get Short Info
+        id: info
+        run: |
+          echo "sha_short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+          echo "commit_msg=$(git log -1 --pretty=format:'%s')" >> $GITHUB_OUTPUT
+
+      - name: Send Notification
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ vars.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          format: markdown
+          message: |
+            *🚀 Thông báo Deploy - Sideline Backend*
+
+            🌍 *Môi trường:* `env`
+            📊 *Trạng thái:* `${{ steps.status.outputs.text }}`
+            📝 *Message:* `${{ steps.info.outputs.commit_msg }}`
+            🆔 *Commit:* `${{ steps.info.outputs.sha_short }}`
+            👤 *By:* `${{ github.actor }}`
+
+            *Chi tiết:* [GitHub Action Log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
+
+  deploy-server2:
+    name: Deploy to env_2.24.71.55
+    if: |
+      github.event.inputs.environment == 'all' ||
+      github.event.inputs.environment == 'env_2.24.71.55'
+    runs-on: ubuntu-latest
+    environment: env_2.24.71.55
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Deploy via SSH
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
+          script: |
+            set -e
+            docker login -u ${{ vars.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
+
+            PROJECT_DIR="/root/green_sideline/sideline-backend"
+            REPO_URL="https://${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git"
+
+            if [ ! -d "$PROJECT_DIR" ]; then
+              git clone $REPO_URL $PROJECT_DIR
+            fi
+
+            cd $PROJECT_DIR
+            git pull origin main
+
+            cat <<EOF > .env
+            DEBUG=False
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            PG_DB=${{ secrets.DB_NAME }}
+            PG_USERNAME=${{ secrets.DB_USER }}
+            PG_PASSWORD=${{ secrets.DB_PASSWORD }}
+            PG_HOST=db
+            PG_PORT=5432
+            REDIS_URL=redis://redis:6379/0
+            EOF
+
+            docker compose pull
+            docker compose down
+            docker compose up -d
+            docker image prune -f
+
+  notify-server2:
+    name: Notify Telegram (env_2.24.71.55)
+    needs: deploy-server2
+    if: always() && (github.event.inputs.environment == 'all' || github.event.inputs.environment == 'env_2.24.71.55')
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Code
+        uses: actions/checkout@v4
+
+      - name: Set status
+        id: status
+        run: |
+          if [ "${{ needs.deploy-server2.result }}" == "success" ]; then
+            echo "text=✅ Thành công" >> $GITHUB_OUTPUT
+          else
+            echo "text=❌ Thất bại" >> $GITHUB_OUTPUT
+          fi
+
+      - name: Get Short Info
+        id: info
+        run: |
+          echo "sha_short=$(echo ${{ github.sha }} | cut -c1-7)" >> $GITHUB_OUTPUT
+          echo "commit_msg=$(git log -1 --pretty=format:'%s')" >> $GITHUB_OUTPUT
+
+      - name: Send Notification
+        uses: appleboy/telegram-action@master
+        with:
+          to: ${{ vars.TELEGRAM_TO }}
+          token: ${{ secrets.TELEGRAM_TOKEN }}
+          format: markdown
+          message: |
+            *🚀 Thông báo Deploy - Sideline Backend*
+
+            🌍 *Môi trường:* `env_2.24.71.55`
+            📊 *Trạng thái:* `${{ steps.status.outputs.text }}`
+            📝 *Message:* `${{ steps.info.outputs.commit_msg }}`
+            🆔 *Commit:* `${{ steps.info.outputs.sha_short }}`
+            👤 *By:* `${{ github.actor }}`
+
+            *Chi tiết:* [GitHub Action Log](https://github.com/${{ github.repository }}/actions/runs/${{ github.run_id }})
