@@ -16,6 +16,9 @@ DONGVAN_KEY = os.environ.get('DONGVAN_KEY')
 MUAVIEW_KEY = os.environ.get('MUAVIEW_KEY')
 SHOPGMAIL_KEY = os.environ.get('SHOPGMAIL_KEY')
 
+def _fmt_key(k): return f"SET({len(k)} chars)" if k else "NOT SET / EMPTY"
+logger.info(f"[API KEYS] sellmmo={_fmt_key(SELLMMO_KEY)} | dongvan={_fmt_key(DONGVAN_KEY)} | muaview={_fmt_key(MUAVIEW_KEY)} | shopgmail={_fmt_key(SHOPGMAIL_KEY)}")
+
 API_CONFIG = {
     "sellmmo": {
         "base_url": "https://www.sellmmo.net/api",
@@ -77,6 +80,8 @@ def fetch_categories(provider: str):
 
     conf = API_CONFIG[provider]
     url = conf["base_url"] + conf["endpoints"]["categories"]
+    key = conf.get("key")
+    logger.info(f"[{provider}] key={'SET(' + str(len(key)) + ' chars)' if key else 'NOT SET / EMPTY'}")
 
     # thêm params khác nhau tùy từng API
     params = {}
@@ -93,10 +98,13 @@ def fetch_categories(provider: str):
 
     try:
         resp = requests.get(url, params=params, timeout=10)
+        if not resp.text.strip():
+            logger.error(f"[{provider}] API trả về response rỗng, status_code={resp.status_code}, url={url}")
+            return {"status": "error", "message": f"API {provider} trả về response rỗng (status {resp.status_code})"}
         data = resp.json()
     except Exception as e:
-        logger.error(f"Lỗi khi gọi tới API của {provider}: {str(e)}")
-        return {"status": "error", "message": "Lỗi hệ thống"}
+        logger.error(f"Lỗi khi gọi tới API của {provider}: {str(e)}, url={url}, status_code={getattr(resp, 'status_code', 'N/A')}, body={getattr(resp, 'text', '')[:200]}")
+        return {"status": "error", "message": f"Lỗi khi gọi API {provider}: {str(e)}"}
 
     result = []
     if provider == "sellmmo":

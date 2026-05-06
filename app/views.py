@@ -1234,7 +1234,7 @@ class MailCategoriesView(APIView):
 
         if result.get("status") == "error":
             return Response(
-                {"status": "error", "message": result.get("error", "Không thể lấy danh sách mail.")},
+                {"status": "error", "message": result.get("message", "Không thể lấy danh sách mail.")},
                 status=status.HTTP_500_INTERNAL_SERVER_ERROR
             )
         if result.get("status") == "success":
