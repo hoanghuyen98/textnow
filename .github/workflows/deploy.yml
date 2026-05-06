@@ -3,122 +3,32 @@ name: Deploy
 on:
   workflow_dispatch:
     inputs:
-      target:
-        description: 'Deploy to which server?'
+      environment:
+        description: 'Chọn env để ứng với server'
         required: true
-        default: 'all'
+        default: 'env'
         type: choice
         options:
-          - all
-          - server_1
-          - server_2
+          - env
+          - env_2.24.71.55
 
 jobs:
-  check:
-    runs-on: ubuntu-latest
-    environment: env
-    outputs:
-      server_1: ${{ steps.check.outputs.server_1 }}
-      server_2: ${{ steps.check.outputs.server_2 }}
-      server_3: ${{ steps.check.outputs.server_3 }}
-      any_ready: ${{ steps.check.outputs.any_ready }}
-    steps:
-      - name: Check credentials
-        id: check
-        env:
-          HOST_1: ${{ vars.SSH_HOST }}
-          HOST_2: ${{ vars.SSH_HOST_2 }}
-          HOST_3: ${{ vars.SSH_HOST_3 }}
-          KEY_1: ${{ secrets.SSH_KEY }}
-          KEY_2: ${{ secrets.SSH_KEY_2 }}
-          KEY_3: ${{ secrets.SSH_KEY_3 }}
-        run: |
-          any_ready=false
-
-          check_server() {
-            local name=$1
-            local host=$2
-            local key=$3
-            if [ -n "$host" ] && [ -n "$key" ]; then
-              echo "$name=true" >> $GITHUB_OUTPUT
-              echo "✅ $name: Đủ credentials"
-              any_ready=true
-            else
-              echo "$name=false" >> $GITHUB_OUTPUT
-              echo "⚠️ $name: Thiếu credentials, bỏ qua"
-            fi
-          }
-
-          check_server "server_1" "$HOST_1" "$KEY_1"
-          check_server "server_2" "$HOST_2" "$KEY_2"
-          check_server "server_3" "$HOST_3" "$KEY_3"
-
-          echo "any_ready=$any_ready" >> $GITHUB_OUTPUT
-
-          if [ "$any_ready" = false ]; then
-            echo "❌ Không có server nào có credentials, dừng pipeline"
-          fi
-
   deploy:
-    needs: check
-    if: needs.check.outputs.any_ready == 'true'  # Không có server nào thì dừng hẳn
+    name: Deploy to ${{ github.event.inputs.environment }}
     runs-on: ubuntu-latest
     environment:
-      name: env
+      name: ${{ github.event.inputs.environment }}
       url: https://github.com/${{ github.repository }}/commit/${{ github.sha }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - name: "Server 1"
-            id: server_1
-            host_var: SSH_HOST
-            user_var: SSH_USER
-            key_secret: SSH_KEY
-
-          - name: "Server 2"
-            id: server_2
-            host_var: SSH_HOST_2
-            user_var: SSH_USER_2
-            key_secret: SSH_KEY_2
-
-          - name: "Server 3"
-            id: server_3
-            host_var: SSH_HOST_3
-            user_var: SSH_USER_3
-            key_secret: SSH_KEY_3
-
-    name: Deploy to ${{ matrix.name }}
     steps:
       - name: Checkout Code
         uses: actions/checkout@v4
-        
-      - name: Skip if no credentials
-        id: check
-        run: |
-          # Đọc output từ job check theo matrix.id
-          ready="${{ needs.check.outputs[matrix.id] }}"
-          target="${{ github.event.inputs.target }}"
-
-          # Kiểm tra target có phải server này không
-          if [ "$target" != "all" ] && [ "$target" != "${{ matrix.id }}" ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⏭️ ${{ matrix.name }}: Không được chọn, bỏ qua"
-          elif [ "$ready" != "true" ]; then
-            echo "skip=true" >> $GITHUB_OUTPUT
-            echo "⚠️ ${{ matrix.name }}: Không có credentials, bỏ qua"
-          else
-            echo "skip=false" >> $GITHUB_OUTPUT
-            echo "✅ ${{ matrix.name }}: Bắt đầu deploy"
-          fi
 
       - name: Deploy via SSH
-        if: steps.check.outputs.skip == 'false'
         uses: appleboy/ssh-action@v1.0.3
         with:
-          host: ${{ vars[matrix.host_var] }}
-          username: ${{ vars[matrix.user_var] }}
-          key: ${{ secrets[matrix.key_secret] }}
+          host: ${{ vars.SSH_HOST }}
+          username: ${{ vars.SSH_USER }}
+          key: ${{ secrets.SSH_KEY }}
           script: |
             set -e
             docker login -u ${{ vars.DOCKER_USERNAME }} -p ${{ secrets.DOCKER_PASSWORD }}
@@ -127,26 +37,23 @@ jobs:
             REPO_URL="https://${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git"
 
             if [ ! -d "$PROJECT_DIR" ]; then
-              echo "Folder chưa tồn tại. Đang tiến hành clone..."
               git clone $REPO_URL $PROJECT_DIR
             fi
 
             cd $PROJECT_DIR
-            git pull https://${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git main
+            git pull origin main
 
-            echo "DEBUG=False" > .env
-            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
-            echo "PG_DB=${{ secrets.DB_NAME }}" >> .env
-            echo "PG_USERNAME=${{ secrets.DB_USER }}" >> .env
-            echo "PG_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
-            echo "DONGVAN_KEY=${{ vars.DONGVAN_KEY }}" >> .env
-            echo "MUAVIEW_KEY=${{ vars.MUAVIEW_KEY }}" >> .env
-            echo "SELLMMO_KEY=${{ vars.SELLMMO_KEY }}" >> .env
-            echo "SHOPGMAIL_KEY=${{ vars.SHOPGMAIL_KEY }}" >> .env
-            echo "PROXY_US=${{ vars.PROXY_US }}" >> .env
-            echo "PG_HOST=db" >> .env
-            echo "PG_PORT=5432" >> .env
-            echo "REDIS_URL=redis://redis:6379/0" >> .env
+            # Ghi file .env
+            cat <<EOF > .env
+            DEBUG=False
+            SECRET_KEY=${{ secrets.SECRET_KEY }}
+            PG_DB=${{ secrets.DB_NAME }}
+            PG_USERNAME=${{ secrets.DB_USER }}
+            PG_PASSWORD=${{ secrets.DB_PASSWORD }}
+            PG_HOST=db
+            PG_PORT=5432
+            REDIS_URL=redis://redis:6379/0
+            EOF
 
             docker compose pull
             docker compose down
@@ -155,9 +62,10 @@ jobs:
 
   notification:
       name: Notify Telegram
-      needs: [check, deploy]
+      needs: deploy
       runs-on: ubuntu-latest
-      if: always() # Chạy ngay cả khi deploy thất bại
+      if: always()
+      environment: ${{ github.event.inputs.environment }}
       steps:
         - name: Get Short Info
           id: info
@@ -176,6 +84,8 @@ jobs:
             message: |
               *🚀 Thông báo Deploy - Sideline Backend*
               
+              🌍 *Môi trường:* `${{ github.event.inputs.environment }}`
+              📊 *Trạng thái:* `${{ needs.deploy.result == 'success' && '✅ Thành công' || '❌ Thất bại' }}`
               📝 *Message:* `${{ steps.info.outputs.commit_msg }}`
               🆔 *Commit:* `${{ steps.info.outputs.sha_short }}`
               👤 *By:* `${{ github.actor }}`
