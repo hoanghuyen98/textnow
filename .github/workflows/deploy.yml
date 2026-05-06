@@ -43,18 +43,21 @@ jobs:
             fi
 
             cd $PROJECT_DIR
-            git pull origin main
+            git pull https://${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git main
 
-            cat <<EOF > .env
-            DEBUG=False
-            SECRET_KEY=${{ secrets.SECRET_KEY }}
-            PG_DB=${{ secrets.DB_NAME }}
-            PG_USERNAME=${{ secrets.DB_USER }}
-            PG_PASSWORD=${{ secrets.DB_PASSWORD }}
-            PG_HOST=db
-            PG_PORT=5432
-            REDIS_URL=redis://redis:6379/0
-            EOF
+            echo "DEBUG=False" > .env
+            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
+            echo "PG_DB=${{ secrets.DB_NAME }}" >> .env
+            echo "PG_USERNAME=${{ secrets.DB_USER }}" >> .env
+            echo "PG_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "DONGVAN_KEY=${{ vars.DONGVAN_KEY }}" >> .env
+            echo "MUAVIEW_KEY=${{ vars.MUAVIEW_KEY }}" >> .env
+            echo "SELLMMO_KEY=${{ vars.SELLMMO_KEY }}" >> .env
+            echo "SHOPGMAIL_KEY=${{ vars.SHOPGMAIL_KEY }}" >> .env
+            echo "PROXY_US=${{ vars.PROXY_US }}" >> .env
+            echo "PG_HOST=db" >> .env
+            echo "PG_PORT=5432" >> .env
+            echo "REDIS_URL=redis://redis:6379/0" >> .env
 
             docker compose pull
             docker compose down
@@ -132,18 +135,21 @@ jobs:
             fi
 
             cd $PROJECT_DIR
-            git pull origin main
+            git pull https://${{ secrets.GH_TOKEN }}@github.com/${{ github.repository }}.git main
 
-            cat <<EOF > .env
-            DEBUG=False
-            SECRET_KEY=${{ secrets.SECRET_KEY }}
-            PG_DB=${{ secrets.DB_NAME }}
-            PG_USERNAME=${{ secrets.DB_USER }}
-            PG_PASSWORD=${{ secrets.DB_PASSWORD }}
-            PG_HOST=db
-            PG_PORT=5432
-            REDIS_URL=redis://redis:6379/0
-            EOF
+            echo "DEBUG=False" > .env
+            echo "SECRET_KEY=${{ secrets.SECRET_KEY }}" >> .env
+            echo "PG_DB=${{ secrets.DB_NAME }}" >> .env
+            echo "PG_USERNAME=${{ secrets.DB_USER }}" >> .env
+            echo "PG_PASSWORD=${{ secrets.DB_PASSWORD }}" >> .env
+            echo "DONGVAN_KEY=${{ vars.DONGVAN_KEY }}" >> .env
+            echo "MUAVIEW_KEY=${{ vars.MUAVIEW_KEY }}" >> .env
+            echo "SELLMMO_KEY=${{ vars.SELLMMO_KEY }}" >> .env
+            echo "SHOPGMAIL_KEY=${{ vars.SHOPGMAIL_KEY }}" >> .env
+            echo "PROXY_US=${{ vars.PROXY_US }}" >> .env
+            echo "PG_HOST=db" >> .env
+            echo "PG_PORT=5432" >> .env
+            echo "REDIS_URL=redis://redis:6379/0" >> .env
 
             docker compose pull
             docker compose down
