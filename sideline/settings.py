@@ -100,7 +100,10 @@ CORS_ALLOWED_ORIGINS = [
     "http://38.145.199.150",
     "http://38.145.199.151",
     "https://sideliine.com",
-    "https://messages-textfree.com"
+    "https://messages-textfree.com",
+    "https://sideline-chat.com",
+    "https://api.sideline-chat.com",
+    "https://www.sideline-chat.com",
 ]
 
 CSRF_TRUSTED_ORIGINS = [
@@ -110,6 +113,9 @@ CSRF_TRUSTED_ORIGINS = [
     "https://www.sideliine.com",
     "https://api.sideliine.com",
     "https://messages-textfree.com",
+    "https://sideline-chat.com",
+    "https://api.sideline-chat.com",
+    "https://www.sideline-chat.com",
 ]
 
 CORS_ALLOWED_ORIGIN_REGEXES = [
