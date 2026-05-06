@@ -64,6 +64,7 @@ jobs:
   notify-env:
     name: Notify Telegram (env)
     needs: deploy-env
+    environment: env
     if: always() && (github.event.inputs.environment == 'all' || github.event.inputs.environment == 'env')
     runs-on: ubuntu-latest
     steps:
@@ -153,6 +154,7 @@ jobs:
     name: Notify Telegram (env_2.24.71.55)
     needs: deploy-server2
     if: always() && (github.event.inputs.environment == 'all' || github.event.inputs.environment == 'env_2.24.71.55')
+    environment: env_2.24.71.55
     runs-on: ubuntu-latest
     steps:
       - name: Checkout Code
