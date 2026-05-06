@@ -102,14 +102,14 @@ def fetch_categories(provider: str):
 
     resp = None
     try:
-        resp = requests.get(url, params=params, timeout=10, proxies=proxies, verify=False)  # nosec B501 - proxy yêu cầu tắt SSL verify
+        resp = requests.get(url, params=params, timeout=10)  # nosec B501 - proxy yêu cầu tắt SSL verify
         if not resp.text.strip():
             logger.error(f"[{provider}] API trả về response rỗng, status_code={resp.status_code}, url={url}")
             return {"status": "error", "message": f"API {provider} trả về response rỗng (status {resp.status_code})"}
         data = resp.json()
     except Exception as e:
         logger.error(f"Lỗi khi gọi tới API của {provider}: {str(e)}, url={url}, status_code={getattr(resp, 'status_code', 'N/A')}, body={getattr(resp, 'text', '')[:200]}")
-        return {"status": "error", "message": f"Lỗi khi gọi API {provider}: {str(e)}"}
+        return {"status": "error", "message": f"Không thể kết nối tới API {provider}"}
 
     result = []
     if provider == "sellmmo":
@@ -238,7 +238,7 @@ def buy_mail_sellmmo(employee, product_id: str, amount: int = 1, coupon: str = "
         "api_key": conf["key"]
     }
 
-    logger.info(f"[SellMMO] payload: {payload}")
+    logger.info(f"[SellMMO] payload: action={payload['action']}, id={payload['id']}, amount={payload['amount']}")
 
     try:
         resp = requests.post(url, data=payload, timeout=15)
