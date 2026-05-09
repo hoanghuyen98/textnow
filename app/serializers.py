@@ -446,6 +446,8 @@ class PurchasedMailSerializer(serializers.ModelSerializer):
             "id",
             "email",
             "password",
+            "refresh_token",
+            "client_id",
             "provider",
             "is_used",
             "created_at",

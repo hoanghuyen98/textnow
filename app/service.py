@@ -246,9 +246,10 @@ def fetch_categories(provider: str):
                 name = item.get("name") or item.get("service") or ""
                 if "textfree" not in name.lower():
                     continue
+                slug = item.get("slug") or name.lower()
                 price = str(item.get("price") or "").strip()
                 result.append({
-                    "id": name,
+                    "id": slug,
                     "name": f"{name} ({price})" if price else name,
                     "price": price,
                 })
