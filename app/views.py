@@ -27,7 +27,7 @@ from rest_framework.views import APIView
 from django.db import IntegrityError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
-from .service import fetch_categories, buy_mail_dongvan, buy_mail_sellmmo, get_auth_code, buy_mail_muaview, buy_mail_shopgmail, buy_mail_muaview_that
+from .service import fetch_categories, buy_mail_dongvan, buy_mail_sellmmo, get_auth_code, buy_mail_muaview, buy_mail_shopgmail, buy_mail_muaview_that, buy_mail_gmail94
 from functools import wraps
 from drf_yasg.utils import swagger_auto_schema
 from django.db import transaction
@@ -1306,6 +1306,9 @@ class BuyMailView(APIView):
             elif provider == "shopgmail":
                 result = buy_mail_shopgmail(employee=user, service_id=product_name, quality=quality)
                 logger.info(f"dd: {result}")
+            elif provider == "gmail94":
+                result = buy_mail_gmail94(employee=user, service_id=product_name, quality=quality)
+                logger.info(f"gmail94: {result}")
             else:
                 return Response(
                     {"status": "error", "message": f"Provider '{provider}' không được hỗ trợ."},

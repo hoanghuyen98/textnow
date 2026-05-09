@@ -15,9 +15,10 @@ SELLMMO_KEY = os.environ.get('SELLMMO_KEY')
 DONGVAN_KEY = os.environ.get('DONGVAN_KEY')
 MUAVIEW_KEY = os.environ.get('MUAVIEW_KEY')
 SHOPGMAIL_KEY = os.environ.get('SHOPGMAIL_KEY')
+GMAIL94_KEY = os.environ.get('GMAIL94_KEY')
 
 def _fmt_key(k): return f"SET({len(k)} chars)" if k else "NOT SET / EMPTY"
-logger.info(f"[API KEYS] sellmmo={_fmt_key(SELLMMO_KEY)} | dongvan={_fmt_key(DONGVAN_KEY)} | muaview={_fmt_key(MUAVIEW_KEY)} | shopgmail={_fmt_key(SHOPGMAIL_KEY)}")
+logger.info(f"[API KEYS] sellmmo={_fmt_key(SELLMMO_KEY)} | dongvan={_fmt_key(DONGVAN_KEY)} | muaview={_fmt_key(MUAVIEW_KEY)} | shopgmail={_fmt_key(SHOPGMAIL_KEY)} | gmail94={_fmt_key(GMAIL94_KEY)}")
 
 API_CONFIG = {
     "sellmmo": {
@@ -58,11 +59,20 @@ API_CONFIG = {
     },
     "shopgmail": {
         "base_url": "https://api.shopgmail9999.com",
-        "key": SHOPGMAIL_KEY,  
+        "key": SHOPGMAIL_KEY,
         "endpoints": {
             "categories": "/api/ApiV2/GetListServices",
             "buy": "/api/ApiV2/CreateOrder",
             "otp": "/api/ApiV2/CheckOtp",
+        }
+    },
+    "gmail94": {
+        "base_url": "https://gmail94.com",
+        "key": GMAIL94_KEY,
+        "endpoints": {
+            "categories": "/api/services",
+            "buy": "/api/otp/create",
+            "otp": "/api/otp/read",
         }
     },
 }
@@ -95,6 +105,8 @@ def fetch_categories(provider: str):
         params["apikey"] = conf["key"]
     elif provider == "shopgmail":
         params["apikey"] = conf["key"]
+    elif provider == "gmail94":
+        params["token"] = conf["key"]
 
     from .utils import get_proxy
     proxy_us = get_proxy()
@@ -220,6 +232,22 @@ def fetch_categories(provider: str):
                 })
             except (KeyError, TypeError):
                 continue
+
+    elif provider == "gmail94":
+        # Response có thể là list string hoặc list object tuỳ phiên bản API
+        items = data if isinstance(data, list) else (data.get("data") or data.get("services") or [])
+        logger.info(f"[gmail94] raw services from API: {items}")
+        for item in items:
+            if isinstance(item, str):
+                result.append({"id": item, "name": item, "price": ""})
+            elif isinstance(item, dict):
+                name = item.get("name") or item.get("service") or ""
+                price = str(item.get("price") or "").strip()
+                result.append({
+                    "id": name,
+                    "name": f"{name} ({price})" if price else name,
+                    "price": price,
+                })
 
     return {"status": "success", "provider": provider, "count": len(result), "data": result}
 
@@ -542,6 +570,89 @@ def buy_mail_shopgmail(employee, service_id, quality: int = 1):
     }
 
 
+def buy_mail_gmail94(employee, service_id: str, quality: int = 1):
+    """
+    Mua mail OTP từ gmail94.com.
+    service_id: tên dịch vụ (vd: "facebook", "instagram", ...)
+    Mỗi lần gọi tạo 1 order → lưu email + order_id vào PurchasedMail.
+    order_id lưu vào client_id, service_name lưu vào refresh_token để dùng khi đọc OTP.
+    """
+    provider = "gmail94"
+    conf = API_CONFIG[provider]
+    url = conf["base_url"] + conf["endpoints"]["buy"]
+
+    mails = []
+
+    logger.info(f"[gmail94] service_id={service_id}, quality={quality}")
+
+    provider_obj, _ = MailProvider.objects.get_or_create(
+        name=provider,
+        defaults={"base_url": conf["base_url"], "api_key": conf["key"] or ""},
+    )
+
+    for i in range(quality):
+        params = {
+            "token": conf["key"],
+            "service": service_id,
+        }
+
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            data = resp.json()
+            logger.info(f"[gmail94][Buy][{i+1}/{quality}] response: {data}")
+        except Exception as e:
+            logger.error(f"Lỗi khi gọi API gmail94: {e}")
+            continue
+
+        # Hỗ trợ cả {"success": true, "data": {...}} và {"email": ..., "order_id": ...}
+        inner = data.get("data") or data
+        order_id = inner.get("order_id") or inner.get("orderid") or inner.get("id")
+        email = inner.get("email")
+
+        if not order_id or not email:
+            logger.error(f"[gmail94] response thiếu email/order_id: {data}")
+            continue
+
+        purchase = MailTransaction.objects.create(
+            provider=provider_obj,
+            employee=employee,
+            product_id=str(service_id),
+            product_name=inner.get("service_name", str(service_id)),
+            quantity=1,
+            total_price=None,
+            trans_id=str(order_id),
+            status="success",
+            raw_response=data,
+        )
+
+        PurchasedMail.objects.create(
+            purchase=purchase,
+            email=email,
+            password="",
+            refresh_token=str(service_id),  # lưu service_name để dùng khi đọc OTP
+            client_id=str(order_id),
+            provider=provider,
+            is_used=False,
+        )
+
+        mails.append({
+            "email": email,
+            "password": "",
+            "refresh_token": str(service_id),
+            "client_id": str(order_id),
+            "provider": provider,
+        })
+
+        logger.info(f"[gmail94] saved mail: {email}, order_id={order_id}")
+        time.sleep(1)
+
+    return {
+        "status": "success" if mails else "error",
+        "message": f"Đã mua {len(mails)} email(s).",
+        "mails": mails,
+    }
+
+
 def buy_mail_dongvan(employee, account_type: int, quality: int = 0, type: str = "full"):
     provider = "dongvan"
     conf = API_CONFIG[provider]
@@ -712,6 +823,35 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
             "date": "",
         }
 
+
+    if provider == "gmail94":
+        url = API_CONFIG["gmail94"]["base_url"] + API_CONFIG["gmail94"]["endpoints"]["otp"]
+        # refresh_token chứa service_name (lưu lúc mua), client_id chứa order_id
+        params = {
+            "token": API_CONFIG["gmail94"]["key"],
+            "order_id": client_id,
+            "service": refresh_token,
+        }
+        logger.info(f"[gmail94] get_auth_code order_id={client_id}, service={refresh_token}")
+        try:
+            resp = requests.get(url, params=params, timeout=15)
+            data = resp.json()
+        except Exception as e:
+            logger.error(f"gmail94 OTP error: {e}")
+            return {"status": "error", "message": "Không kết nối được gmail94"}
+
+        inner = data.get("data") or data
+        otp = inner.get("otp") or inner.get("code")
+
+        return {
+            "status": "success" if otp else "pending",
+            "provider": "gmail94",
+            "email": inner.get("email") or email,
+            "auth_code": otp or "",
+            "from": "",
+            "subject": "",
+            "date": "",
+        }
 
     if provider in ("sellmmo", "dongvan"):
         provider = "dongvan"
