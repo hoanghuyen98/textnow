@@ -239,9 +239,13 @@ def fetch_categories(provider: str):
         logger.info(f"[gmail94] raw services from API: {items}")
         for item in items:
             if isinstance(item, str):
+                if "textfree" not in item.lower():
+                    continue
                 result.append({"id": item, "name": item, "price": ""})
             elif isinstance(item, dict):
                 name = item.get("name") or item.get("service") or ""
+                if "textfree" not in name.lower():
+                    continue
                 price = str(item.get("price") or "").strip()
                 result.append({
                     "id": name,
