@@ -1307,7 +1307,7 @@ class BuyMailView(APIView):
                 result = buy_mail_shopgmail(employee=user, service_id=product_name, quality=quality)
                 logger.info(f"dd: {result}")
             elif provider == "gmail94":
-                result = buy_mail_gmail94(employee=user, service_id=product_name, quality=quality)
+                result = buy_mail_gmail94(employee=user, service_id=product_id, quality=quality)
                 logger.info(f"gmail94: {result}")
             else:
                 return Response(
