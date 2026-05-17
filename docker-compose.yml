@@ -10,20 +10,22 @@ services:
       - POSTGRES_DB=${PG_DB}
       - POSTGRES_USER=${PG_USERNAME}
       - POSTGRES_PASSWORD=${PG_PASSWORD}
-    ports:
-      - "5432:5432"
+    # ĐÃ BỎ PORTS 5432 để chặn hacker quét cổng DB trực tiếp từ ngoài internet
     restart: always
+    networks:
+      - sideline_internal
 
   redis:
     image: redis:7-alpine
     container_name: sideline_redis
     restart: always
+    networks:
+      - sideline_internal
 
   web:
     image: 01646083113/sideline-backend:v1.0.0
     container_name: sideline_web
-    ports:
-      - "8000:8000"
+    # ĐÃ BỎ PORTS 8000 vì Traefik sẽ bắn request qua mạng nội bộ, không cần mở cổng ra VPS nữa
     environment:
       - PG_DB=${PG_DB}
       - PG_USERNAME=${PG_USERNAME}
@@ -46,6 +48,21 @@ services:
       - db
       - redis
     restart: always
+    # CẤU HÌNH TRAEFIK NHẬN DIỆN DOMAIN TẠI ĐÂY
+    labels:
+      - "traefik.enable=true"
+      
+      # 1. Điền domain sideline của bạn vào đây (Hỗ trợ cả bản www nếu cần)
+      - "traefik.http.routers.sideline_web_router.rule=Host(`api.sideliine.com`)"
+      - "traefik.http.routers.sideline_web_router.entrypoints=websecure"
+      - "traefik.http.routers.sideline_web_router.tls=true"
+      - "traefik.http.routers.sideline_web_router.tls.certresolver=myresolver" # Dùng chung bộ cấp SSL với Traefik proxy
+      
+      # 2. Khai báo cổng mà ứng dụng Django bên trong container đang chạy (Cổng 8000)
+      - "traefik.http.services.sideline_web_service.loadbalancer.server.port=8000"
+    networks:
+      - sideline_internal
+      - webproxy # Tham gia mạng chung để Traefik tìm thấy
 
   celery_worker:
     image: 01646083113/sideline-backend:v1.0.0
@@ -70,6 +87,8 @@ services:
       - db
       - redis
     restart: always
+    networks:
+      - sideline_internal
 
   celery_beat:
     image: 01646083113/sideline-backend:v1.0.0
@@ -81,6 +100,14 @@ services:
     depends_on:
       - redis
     restart: always
+    networks:
+      - sideline_internal
 
 volumes:
   postgres_data:
+
+networks:
+  sideline_internal:
+    internal: true # Mạng cô lập nội bộ bảo mật cho DB và Redis
+  webproxy:
+    external: true # Kết nối với mạng ngoài chứa Traefik
