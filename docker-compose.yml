@@ -60,6 +60,8 @@ services:
       
       # 2. Khai báo cổng mà ứng dụng Django bên trong container đang chạy (Cổng 8000)
       - "traefik.http.services.sideline_web_service.loadbalancer.server.port=8000"
+
+      - "traefik.docker.network=webproxy"
     networks:
       - sideline_internal
       - webproxy # Tham gia mạng chung để Traefik tìm thấy
