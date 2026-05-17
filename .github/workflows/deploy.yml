@@ -61,7 +61,7 @@ jobs:
             echo "REDIS_URL=redis://redis:6379/0" >> .env
 
             docker compose pull
-            docker compose down
+            docker compose down --remove-orphans || true
             docker compose up -d
             docker image prune -f
 

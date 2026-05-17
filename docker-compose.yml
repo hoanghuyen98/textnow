@@ -108,6 +108,6 @@ volumes:
 
 networks:
   sideline_internal:
-    internal: true # Mạng cô lập nội bộ bảo mật cho DB và Redis
+    driver: bridge # Mạng cô lập nội bộ bảo mật cho DB và Redis
   webproxy:
     external: true # Kết nối với mạng ngoài chứa Traefik
