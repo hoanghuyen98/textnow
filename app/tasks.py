@@ -198,10 +198,16 @@ def process_phoneaccount_background(phone_name):
         phone_obj.save(update_fields=["status", "customer"])
 
         # Mark mail used
-        purchased_mail.is_used = True
-        purchased_mail.save(update_fields=["is_used"])
+        if purchased_mail:
+            purchased_mail.is_used = True
+            purchased_mail.save(update_fields=["is_used"])
+
         logger.info("đã xong")
-        return {"status": "success", "phone": phone_obj.phone}
+
+        if is_live:
+            return {"status": "success", "phone": phone_obj.phone}
+        else:
+            return {"status": "error", "message": "Số điện thoại không hoạt động (die). Vui lòng kiểm tra lại curl batch."}
 
     except Exception as e:
         import traceback

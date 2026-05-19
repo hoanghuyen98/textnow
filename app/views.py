@@ -2056,9 +2056,16 @@ class TaskStatusView(APIView):
             })
 
         if result.state == "SUCCESS":
+            task_result = result.result or {}
+            if task_result.get("status") == "error":
+                return Response({
+                    "status": "error",
+                    "message": task_result.get("message", "Task hoàn thành nhưng có lỗi.")
+                })
             return Response({
                 "status": "success",
-                "data": result.result.get("data", [])
+                "message": task_result.get("message"),
+                "data": task_result.get("data", [])
             })
 
         return Response({"status": result.state.lower()})
