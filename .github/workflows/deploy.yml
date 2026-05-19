@@ -60,6 +60,7 @@ jobs:
             echo "PG_PORT=5432" >> .env
             echo "REDIS_URL=redis://redis:6379/0" >> .env
 
+            docker network create webproxy 2>/dev/null || true
             docker compose pull
             docker compose down --remove-orphans || true
             docker compose up -d
@@ -153,6 +154,7 @@ jobs:
             echo "PG_PORT=5432" >> .env
             echo "REDIS_URL=redis://redis:6379/0" >> .env
 
+            docker network create webproxy 2>/dev/null || true
             docker compose pull
             docker compose down
             docker compose up -d
