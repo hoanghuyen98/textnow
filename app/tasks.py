@@ -12,7 +12,7 @@ from django.core.cache import cache
 import secrets
 import time
 from django.contrib.auth.hashers import make_password
-from .utils import run_curl_with_retry
+from .utils import run_curl_with_retry, get_textnow_inbox
 from rest_framework_simplejwt.token_blacklist.models import OutstandingToken, BlacklistedToken
 import logging
 from celery import group
@@ -25,19 +25,22 @@ def check_single_phone(phone_id):
     time.sleep(5)
     phone = PhoneAccount.objects.get(id=phone_id)
 
-    curl_text = phone.batch
-    result = run_curl(curl_text)
+    is_textnow = (phone.provider or "").lower() == "textnow"
+    if is_textnow:
+        result = get_textnow_inbox(phone.batch)
+    else:
+        result = run_curl(phone.batch)
 
     now = timezone.now()
     live_expired_time = now - timedelta(days=3)
     msg = ""
 
     if result["status"] != "success":
-        logger.info(result["message"])
+        logger.info(result.get("message", ""))
         phone.status = "die_use"
         phone.save(update_fields=["status"])
 
-        msg = f"Lỗi: {result['message']}"
+        msg = f"Lỗi: {result.get('message', '')}"
         logger.info(f"[{phone.phone}] ❌ {msg}")
     else:
         phone.status = "live"
@@ -173,7 +176,12 @@ def process_phoneaccount_background(phone_name):
         purchased_mail = phone_obj.purchased_mail
 
         # --- Check xem số live hay die ---
-        is_live = run_curl_with_retry(phone_obj.batch, retries=2)
+        is_textnow = (phone_obj.provider or "").lower() == "textnow"
+        if is_textnow:
+            result = get_textnow_inbox(phone_obj.batch)
+            is_live = result.get("status") == "success"
+        else:
+            is_live = run_curl_with_retry(phone_obj.batch, retries=2)
         logger.info(is_live)
         if is_live:
             phone_obj.status = "live"

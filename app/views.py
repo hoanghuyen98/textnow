@@ -15,7 +15,7 @@ from rest_framework.decorators import api_view, permission_classes
 import base64
 from .models import PhoneAccount, PurchasedMail, AppleMailProxy, TextNowAccount, Employee, EmployeeGroup, Customer, MailTransaction, AppleMailProxy, CustomerAssignHistory, MessageHistoryLog, ProxySetting
 from rest_framework.permissions import IsAuthenticated, AllowAny
-from .utils import run_curl, parse_curl, strip_proxy, send_pinger_message, normalize_phone_number, parse_time, to_utc_isoformat, run_curl_with_retry, upload_pinger_media
+from .utils import run_curl, parse_curl, strip_proxy, send_pinger_message, normalize_phone_number, parse_time, to_utc_isoformat, run_curl_with_retry, upload_pinger_media, get_textnow_inbox, send_textnow_message
 from rest_framework_simplejwt.views import TokenObtainPairView, TokenRefreshView
 from rest_framework_simplejwt.serializers import TokenObtainPairSerializer, TokenRefreshSerializer
 from rest_framework_simplejwt.tokens import AccessToken
@@ -27,7 +27,7 @@ from rest_framework.views import APIView
 from django.db import IntegrityError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
-from .service import fetch_categories, buy_mail_dongvan, buy_mail_sellmmo, get_auth_code, buy_mail_muaview, buy_mail_shopgmail, buy_mail_muaview_that, buy_mail_gmail94
+from .service import fetch_categories, buy_mail_dongvan, get_auth_code, buy_mail_muaview, buy_mail_shopgmail, buy_mail_muaview_that, buy_mail_gmail94, buy_mail_tmail12
 from functools import wraps
 from drf_yasg.utils import swagger_auto_schema
 from django.db import transaction
@@ -886,6 +886,75 @@ class RefreshInboxView(APIView):
         # --- Fetch PhoneAccount ---
         obj = get_object_or_404(PhoneAccount, name=phone)
 
+        is_textnow = (obj.provider or "").lower() == "textnow"
+
+        if is_textnow:
+            # --- TextNow path ---
+            if not obj.batch:
+                return Response(
+                    {"status": "error", "message": INBOX_MESSAGES["missing_batch"]},
+                    status=status.HTTP_404_NOT_FOUND
+                )
+
+            raw_result = get_textnow_inbox(obj.batch)
+            if raw_result.get("status") == "error":
+                obj.status = "die_use"
+                obj.save(update_fields=["status"])
+                return Response(
+                    {"status": "error", "message": raw_result.get("message"), "detail": raw_result},
+                    status=status.HTTP_502_BAD_GATEWAY,
+                )
+
+            contacts = {}
+            conversations = {}
+
+            try:
+                messages_data = raw_result.get("body", {}).get("messages", [])
+                for msg in messages_data:
+                    if msg.get("deleted"):
+                        continue
+
+                    contact_value = msg.get("contact_value", "")
+                    if not contact_value:
+                        continue
+
+                    # message_direction: 1=incoming (in), 2=outgoing (out)
+                    direction = "out" if msg.get("message_direction") == 2 else "in"
+                    text = msg.get("message", "")
+                    date = msg.get("date", "")
+                    contact_name = msg.get("contact_name") or ""
+
+                    if not contact_name and len(contact_value) >= 10:
+                        digits = contact_value[-10:]
+                        contact_name = f"({digits[:3]}) {digits[3:6]}-{digits[6:]}"
+
+                    if contact_value not in contacts:
+                        contacts[contact_value] = contact_name
+                    elif not contacts[contact_value] and contact_name:
+                        contacts[contact_value] = contact_name
+
+                    conversations.setdefault(contact_value, []).append({
+                        "direction": direction,
+                        "text": text,
+                        "image": None,
+                        "time": date,
+                    })
+
+                contact_list = [{"phone": p, "name": n} for p, n in contacts.items()]
+                return Response({
+                    "status": "success",
+                    "message": INBOX_MESSAGES["success"],
+                    "results": {"contacts": contact_list, "conversations": conversations}
+                }, status=status.HTTP_200_OK)
+
+            except Exception as e:
+                logger.error(f"Error processing TextNow inbox: {str(e)}")
+                return Response(
+                    {"status": "error", "message": INBOX_MESSAGES["processing_error"]},
+                    status=status.HTTP_500_INTERNAL_SERVER_ERROR
+                )
+
+        # --- Pinger path ---
         if not obj.batch:
             return Response(
                 {
@@ -934,7 +1003,7 @@ class RefreshInboxView(APIView):
 
         body = raw_result.get("body")
 
-        # --- Extract Messages ---
+        # --- Extract Pinger Messages ---
         contacts = {}
         conversations = {}
 
@@ -958,7 +1027,6 @@ class RefreshInboxView(APIView):
                     media = msg.get("media", {}).get("image") if msg.get("media") else None
                     time_created = to_utc_isoformat(msg.get("timeCreated"))
 
-                    # Determine "other" side
                     if direction == "out":
                         other_info = msg.get("to", [{}])[0]
                     else:
@@ -970,11 +1038,9 @@ class RefreshInboxView(APIView):
                     if not other_number:
                         continue
 
-                    # Auto format name if missing
                     if not other_name:
                         other_name = f"({other_number[:3]}) {other_number[3:6]}-{other_number[6:]}"
 
-                    # Update contacts with better names
                     if other_number not in contacts:
                         contacts[other_number] = other_name
                     else:
@@ -983,7 +1049,6 @@ class RefreshInboxView(APIView):
                         if prev_name in [other_number, default_format] and other_name not in [other_number, default_format]:
                             contacts[other_number] = other_name
 
-                    # Save message into conversation
                     conversations.setdefault(other_number, []).append({
                         "direction": direction,
                         "text": text,
@@ -993,7 +1058,6 @@ class RefreshInboxView(APIView):
                         "is_new_conversation": is_new_conversation
                     })
 
-            # --- Prepare final result ---
             contact_list = [{"phone": p, "name": n} for p, n in contacts.items()]
 
             return Response({
@@ -1068,31 +1132,39 @@ class SendMessageView(APIView):
                     status=status.HTTP_404_NOT_FOUND
                 )
 
-            # === Remove media from existing cURL ===
-            curl_text = re.sub(r',?\s*"media"\s*:\s*\{[^}]*\}', '', curl_text)
+            is_textnow = (obj.provider or "").lower() == "textnow"
 
-            # === Replace payload body ===
-            new_body = {
-                "text": text,
-                "to": [{"name": name, "TN": to_number}]
-            }
-            body_str = json.dumps(new_body, ensure_ascii=False)
+            if is_textnow:
+                # === TextNow send ===
+                result = send_textnow_message(
+                    message_curl=curl_text,
+                    to_number=to_number,
+                    text=text,
+                )
+            else:
+                # === Pinger send ===
+                curl_text = re.sub(r',?\s*"media"\s*:\s*\{[^}]*\}', '', curl_text)
 
-            updated_curl = re.sub(
-                r'(--data-raw\s*\')[^\']*(\')',
-                f"--data-raw '{body_str}'",
-                curl_text
-            )
+                new_body = {
+                    "text": text,
+                    "to": [{"name": name, "TN": to_number}]
+                }
+                body_str = json.dumps(new_body, ensure_ascii=False)
 
-            logger.info(f"Updated cURL: {updated_curl}", )
+                updated_curl = re.sub(
+                    r'(--data-raw\s*\')[^\']*(\')',
+                    f"--data-raw '{body_str}'",
+                    curl_text
+                )
 
-            # === Send actual message ===
-            result = send_pinger_message(
-                message_curl=updated_curl,
-                to_number=to_number,
-                text=text,
-                name=name
-            )
+                logger.info(f"Updated cURL: {updated_curl}")
+
+                result = send_pinger_message(
+                    message_curl=updated_curl,
+                    to_number=to_number,
+                    text=text,
+                    name=name
+                )
 
             status_code = result.get("status_code", 200)
             response_data = result.get("response", {})
@@ -1136,9 +1208,6 @@ class SendMediaView(APIView):
         to_number, name = normalize_phone_number(to_raw)
         file = request.FILES.get("file")
 
-        if not to_number.startswith("1"):
-            to_number = "1" + to_number
-
         if not all([phone, to_number, file]):
             return Response({
                 "status": "error",
@@ -1153,9 +1222,23 @@ class SendMediaView(APIView):
                 "message": SEND_MEDIA_MESSAGES["invalid_phone"],
             }, status=400)
 
+        is_textnow = (obj.provider or "").lower() == "textnow"
+
+        if is_textnow:
+            return Response({
+                "status": "error",
+                "message": "TextNow does not support media sending.",
+            }, status=400)
+
         # -------------------------
-        # STEP 1 — UPLOAD MEDIA
+        # STEP 1 — UPLOAD MEDIA (Pinger/Textfree)
         # -------------------------
+        if not obj.media:
+            return Response({
+                "status": "error",
+                "message": SEND_MEDIA_MESSAGES["missing_curl"],
+            }, status=400)
+
         uploaded_url, err = upload_pinger_media(obj.media, file)
 
         if err == "upload_failed":
@@ -1171,7 +1254,7 @@ class SendMediaView(APIView):
             }, status=400)
 
         # -------------------------
-        # STEP 2 — SEND MESSAGE
+        # STEP 2 — SEND MESSAGE (Pinger/Textfree)
         # -------------------------
         send_result = send_pinger_message(
             message_curl=obj.message,
@@ -1184,7 +1267,7 @@ class SendMediaView(APIView):
         status_code = send_result.get("status_code", 200)
         response_data = send_result.get("response", {})
 
-        if "errNo" in response_data:
+        if isinstance(response_data, dict) and "errNo" in response_data:
             status_code = 400
 
         return Response({
@@ -1203,12 +1286,12 @@ class MailCategoriesView(APIView):
     throttle_classes = [ScopedRateThrottle]
     throttle_scope = 'medium'
     @swagger_auto_schema(
-        operation_description="Lấy danh sách categories mail từ provider (ví dụ: sellmmo, dongvan).",
+        operation_description="Lấy danh sách categories mail từ provider (ví dụ: dongvan, shopgmail).",
         manual_parameters=[
             openapi.Parameter(
                 "provider",
                 openapi.IN_QUERY,
-                description="Tên provider (sellmmo, dongvan, shopgmail, ...)",
+                description="Tên provider (dongvan, shopgmail, ...)",
                 type=openapi.TYPE_STRING,
                 required=True
             )
@@ -1252,10 +1335,10 @@ class MailCategoriesView(APIView):
             
 class BuyMailView(APIView):
     """
-    ✅ API: Mua mail từ provider (SellMMO hoặc DongVan)
+    ✅ API: Mua mail từ provider (DongVan, MuaView, ShopGmail, Gmail94)
     - Body JSON:
       {
-        "provider": "sellmmo",
+        "provider": "dongvan",
         "product_id": "1782",
         "amount": 2,
         "coupon": ""
@@ -1292,10 +1375,7 @@ class BuyMailView(APIView):
         coupon = request.data.get("coupon", "")
 
         try:
-            if provider == "sellmmo":
-                result = buy_mail_sellmmo(employee=user, product_id=product_id, amount=quality, coupon=coupon)
-                logger.info(f'result: {result}')
-            elif provider == "dongvan":
+            if provider == "dongvan":
                 result = buy_mail_dongvan(employee=user, account_type=product_id, quality=quality)
             elif provider == "muaview":
                 result = buy_mail_muaview(employee=user, service_id=product_id, quality=quality)
@@ -1309,6 +1389,9 @@ class BuyMailView(APIView):
             elif provider == "gmail94":
                 result = buy_mail_gmail94(employee=user, service_id=product_id, quality=quality)
                 logger.info(f"gmail94: {result}")
+            elif provider == "tmail12":
+                result = buy_mail_tmail12(employee=user, product_id=product_id, amount=quality, coupon=coupon)
+                logger.info(f"tmail12: {result}")
             else:
                 return Response(
                     {"status": "error", "message": f"Provider '{provider}' không được hỗ trợ."},

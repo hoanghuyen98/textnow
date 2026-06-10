@@ -11,25 +11,16 @@ import os
 from .utils import extract_auth_code, parse_mail_date 
 load_dotenv()
 
-SELLMMO_KEY = os.environ.get('SELLMMO_KEY')
 DONGVAN_KEY = os.environ.get('DONGVAN_KEY')
 MUAVIEW_KEY = os.environ.get('MUAVIEW_KEY')
 SHOPGMAIL_KEY = os.environ.get('SHOPGMAIL_KEY')
 GMAIL94_KEY = os.environ.get('GMAIL94_KEY')
+TMAIL12_KEY = os.environ.get('TMAIL12_KEY')
 
 def _fmt_key(k): return f"SET({len(k)} chars)" if k else "NOT SET / EMPTY"
-logger.info(f"[API KEYS] sellmmo={_fmt_key(SELLMMO_KEY)} | dongvan={_fmt_key(DONGVAN_KEY)} | muaview={_fmt_key(MUAVIEW_KEY)} | shopgmail={_fmt_key(SHOPGMAIL_KEY)} | gmail94={_fmt_key(GMAIL94_KEY)}")
+logger.info(f"[API KEYS] dongvan={_fmt_key(DONGVAN_KEY)} | muaview={_fmt_key(MUAVIEW_KEY)} | shopgmail={_fmt_key(SHOPGMAIL_KEY)} | gmail94={_fmt_key(GMAIL94_KEY)} | tmail12={_fmt_key(TMAIL12_KEY)}")
 
 API_CONFIG = {
-    "sellmmo": {
-        "base_url": "https://www.sellmmo.net/api",
-        "key": SELLMMO_KEY,
-        "endpoints": {
-            "categories": "/products.php",
-            "buy": "/buy_product",
-            "otp": "https://tools.dongvanfb.net/api/get_messages_oauth2"
-        }
-    },
     "dongvan": {
         "base_url": "https://api.dongvanfb.net",
         "key": DONGVAN_KEY,  
@@ -75,6 +66,14 @@ API_CONFIG = {
             "otp": "/api/otp/read",
         }
     },
+    "tmail12": {
+        "base_url": "https://tmail12.com/api",
+        "key": TMAIL12_KEY,
+        "endpoints": {
+            "categories": "/products.php",
+            "buy": "/buy_product",
+        }
+    },
 }
 
 
@@ -82,7 +81,7 @@ API_CONFIG = {
 def fetch_categories(provider: str):
     """
     Gọi API lấy danh mục của từng provider.
-    provider: sellmmo | dongvan | shopgmail
+    provider: dongvan | shopgmail | tmail12
     """
     provider = provider.lower().strip()
     if provider not in API_CONFIG:
@@ -95,7 +94,7 @@ def fetch_categories(provider: str):
 
     # thêm params khác nhau tùy từng API
     params = {}
-    if provider == "sellmmo":
+    if provider == "tmail12":
         params["api_key"] = conf["key"]
     elif provider == "dongvan":
         params["apikey"] = conf["key"]
@@ -124,42 +123,33 @@ def fetch_categories(provider: str):
         return {"status": "error", "message": f"Không thể kết nối tới API {provider}"}
 
     result = []
-    if provider == "sellmmo":
+    if provider == "tmail12":
         categories = data.get("categories") or []
-
-        allowed_category_ids = {"14", "57"}
-        all_ids = [str(cat.get("id")) for cat in categories]
-        logger.info(f"[sellmmo] all category ids from API: {all_ids}")
-
+        logger.info(f"[tmail12] all category ids from API: {[cat.get('id') for cat in categories]}")
         for cat in categories:
-            if str(cat.get("id")) not in allowed_category_ids:
-                continue
-
             for p in cat.get("products", []):
                 full_name = p.get("name", "")
                 price = str(p.get("price") or "").strip()
-
-                short_name = full_name.split("-")[0].strip()
+                short_name = full_name.split("[")[0].strip()
                 if price:
                     short_name = f"{short_name} ({price})"
-
                 result.append({
                     "id": p.get("id"),
                     "name": short_name,
                     "price": price,
                     "amount": p.get("amount"),
-                    "description": p.get("desc") or p.get("description"),
-                    "icon": cat.get("icon")
+                    "description": p.get("description"),
                 })
 
     elif provider == "dongvan":
         items = data.get("data") or []
+        allowed_ids = {1, 2, 5, 6}
         logger.info(f"[dongvan] all ids from API: {[item.get('id') for item in items]}")
         for item in items:
             if not str(item.get("id", "")).isdigit():
                 continue
             item_id = int(item["id"])
-            if item_id not in (1, 2):
+            if item_id not in allowed_ids:
                 continue
             name = item.get("name") or ""
             price = item.get("price") or ""
@@ -257,9 +247,8 @@ def fetch_categories(provider: str):
     return {"status": "success", "provider": provider, "count": len(result), "data": result}
 
 
-def buy_mail_sellmmo(employee, product_id: str, amount: int = 1, coupon: str = ""):
-
-    provider = "sellmmo"
+def buy_mail_tmail12(employee, product_id: str, amount: int = 1, coupon: str = ""):
+    provider = "tmail12"
     conf = API_CONFIG[provider]
     url = conf["base_url"] + conf["endpoints"]["buy"]
 
@@ -268,17 +257,17 @@ def buy_mail_sellmmo(employee, product_id: str, amount: int = 1, coupon: str = "
         "id": product_id,
         "amount": amount,
         "coupon": coupon,
-        "api_key": conf["key"]
+        "api_key": conf["key"],
     }
 
-    logger.info(f"[SellMMO] payload: action={payload['action']}, id={payload['id']}, amount={payload['amount']}")
+    logger.info(f"[tmail12] payload: id={payload['id']}, amount={payload['amount']}")
 
     try:
         resp = requests.post(url, data=payload, timeout=15)
         data = resp.json()
     except Exception as e:
-        logger.error(f"Lỗi khi gọi API SellMMO: {e}")
-        return {"status": "error", "message": f"Lỗi hệ thống mua mail"}
+        logger.error(f"Lỗi khi gọi API tmail12: {e}")
+        return {"status": "error", "message": "Lỗi hệ thống mua mail"}
 
     if data.get("status") != "success":
         return {"status": "error", "message": data.get("msg", "Lỗi không xác định")}
@@ -289,15 +278,12 @@ def buy_mail_sellmmo(employee, product_id: str, amount: int = 1, coupon: str = "
         parts = item.split("|")
         email = parts[0].strip() if len(parts) > 0 else ""
         password = parts[1].strip() if len(parts) > 1 else ""
-        refresh_token = parts[2].strip() if len(parts) > 2 else ""
-        client_id = parts[3].strip() if len(parts) > 3 else ""
-
         mails.append({
             "email": email,
             "password": password,
-            "refresh_token": refresh_token,
-            "client_id": client_id,
-            "provider": provider
+            "refresh_token": "",
+            "client_id": "",
+            "provider": provider,
         })
 
     provider_obj, _ = MailProvider.objects.get_or_create(
@@ -318,18 +304,18 @@ def buy_mail_sellmmo(employee, product_id: str, amount: int = 1, coupon: str = "
     for m in mails:
         PurchasedMail.objects.create(
             purchase=purchase,
-            email=m.get("email"),
-            password=m.get("password"),
-            refresh_token=m.get("refresh_token", ""),
-            client_id=m.get("client_id", ""),
-            provider=m.get("provider", provider),
-            is_used=False
+            email=m["email"],
+            password=m["password"],
+            refresh_token="",
+            client_id="",
+            provider=provider,
+            is_used=False,
         )
 
     return {
         "status": "success",
         "message": f"Đã mua {len(mails)} email(s).",
-        "mails": mails
+        "mails": mails,
     }
 
 
@@ -739,8 +725,8 @@ def buy_mail_dongvan(employee, account_type: int, quality: int = 0, type: str = 
 
 def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str):
     """
-    - Tự detect provider từ PurchasedMail (sellmmo / dongvan / muaview)
-    - sellmmo + dongvan → dùng inbox OAuth2 (tools.dongvanfb.net)
+    - Tự detect provider từ PurchasedMail (dongvan / muaview)
+    - dongvan → dùng inbox OAuth2 (tools.dongvanfb.net)
     - muaview → dùng order_id = client_id (CheckOtpOrder)
     - Giữ nguyên format response legacy
     """
@@ -858,8 +844,7 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
             "date": "",
         }
 
-    if provider in ("sellmmo", "dongvan"):
-        provider = "dongvan"
+    if provider == "dongvan":
 
         url = API_CONFIG[provider]["endpoints"]["otp"]  # đều là tools.dongvanfb.net/api/get_messages_oauth2
         payload = {

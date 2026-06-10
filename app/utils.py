@@ -159,13 +159,17 @@ def parse_curl(c):
     if HAS_CONVERTER and hasattr(curlconverter, "parse"):
         try:
             p = curlconverter.parse(c)
+            headers = p.get("headers", {})
+            cookies = p.get("cookies", {})
+            if cookies:
+                headers["Cookie"] = "; ".join(f"{k}={v}" for k, v in cookies.items())
             return {"method": p.get("method", "GET"), "url": p.get("url"),
-                    "headers": p.get("headers", {}), "data": p.get("data")}
+                    "headers": headers, "data": p.get("data")}
         except Exception:
             pass
 
     t = shlex.split(c)
-    m, u, h, d = "GET", None, {}, None
+    m, u, h, d, cookie = "GET", None, {}, None, None
     i = 0
     while i < len(t):
         if t[i] == "curl" and i + 1 < len(t): u = t[i + 1].strip("'\"")
@@ -174,9 +178,13 @@ def parse_curl(c):
             k, v = t[i + 1].split(":", 1); h[k.strip()] = v.strip().strip("'\"")
         elif t[i].startswith("--data") or t[i] == "-d":
             d = t[i + 1].strip("'\"") if i + 1 < len(t) else None
+        elif t[i] == "--cookie" and i + 1 < len(t):
+            cookie = t[i + 1].strip("'\"")
         elif t[i].startswith("http"): u = t[i].strip("'\"")
         i += 1
     h.pop("Host", None)
+    if cookie:
+        h["Cookie"] = cookie
     return {"method": m, "url": u, "headers": h, "data": d}
 
 
@@ -440,6 +448,175 @@ def send_pinger_message(
         "response": result,
         "message": "Message sent successfully.",
         "body_sent": body,
+    }
+
+
+def get_textnow_inbox(message_curl: str):
+    """
+    Lấy lịch sử tin nhắn từ TextNow API bằng cách dùng message curl để lấy headers/URL.
+    """
+    from urllib.parse import urlparse, parse_qs, urlencode
+
+    proxy_us = get_proxy()
+    message_curl = replace_proxy(message_curl, proxy_us)
+
+    parsed = parse_curl(message_curl)
+    msg_url = parsed.get("url", "")
+    headers = dict(parsed.get("headers", {}))
+    headers.pop("Host", None)
+
+    url_parts = urlparse(msg_url)
+    base_params = parse_qs(url_parts.query, keep_blank_values=True)
+    flat_params = {k: v[0] for k, v in base_params.items()}
+    flat_params["page_size"] = "30"
+    flat_params["start_message_id"] = "0"
+
+    base_url = f"{url_parts.scheme}://{url_parts.netloc}{url_parts.path}"
+    proxy_cfg = {"http": proxy_us, "https": proxy_us}
+
+    try:
+        resp = requests.get(base_url, params=flat_params, headers=headers, proxies=proxy_cfg, timeout=30)
+    except requests.RequestException as e:
+        return {"status": "error", "message": f"network_error: {str(e)}"}
+
+    try:
+        result = resp.json()
+    except Exception:
+        return {"status": "error", "message": "Invalid JSON response"}
+
+    if resp.status_code >= 400 or "messages" not in result:
+        return {"status": "error", "message": f"HTTP Error {resp.status_code}", "response": result}
+
+    return {"status": "success", "body": result}
+
+
+def send_textnow_message(message_curl: str, to_number: str, text: str, from_name: str = ""):
+    """
+    Gửi tin nhắn qua TextNow API dùng message curl để lấy URL và headers.
+    """
+    proxy_us = get_proxy()
+    has_proxy = bool(re.search(r'--proxy', message_curl or '', re.IGNORECASE))
+    if has_proxy:
+        message_curl = replace_proxy(message_curl, proxy_us)
+
+    parsed = parse_curl(message_curl)
+    msg_url = parsed.get("url", "")
+    headers = dict(parsed.get("headers", {}))
+    headers.pop("Host", None)
+
+    if not from_name:
+        raw_data = parsed.get("data", "") or ""
+        try:
+            original_body = json.loads(raw_data)
+            from_name = original_body.get("from_name", "")
+        except Exception:
+            from_name = ""
+
+    contact_value = to_number if to_number.startswith("+") else "+" + to_number
+
+    body = {
+        "contact_type": 2,
+        "contact_value": contact_value,
+        "to_name": None,
+        "message": text,
+        "from_name": from_name,
+    }
+
+    logger.info(f"send_textnow_message body: {body}")
+    proxy_cfg = {"http": proxy_us, "https": proxy_us}
+
+    try:
+        resp = requests.post(msg_url, headers=headers, json=body, proxies=proxy_cfg, timeout=30)
+    except requests.RequestException as e:
+        return {"status": "error", "message": f"network_error: {str(e)}"}
+
+    try:
+        result = resp.json()
+    except Exception:
+        result = resp.text
+
+    if resp.status_code >= 400:
+        return {
+            "status": "error",
+            "status_code": resp.status_code,
+            "message": f"HTTP Error {resp.status_code}",
+            "response": result,
+        }
+
+    return {
+        "status": "success",
+        "status_code": resp.status_code,
+        "response": result,
+        "message": "Message sent successfully.",
+    }
+
+
+def send_textnow_media(message_curl: str, to_number: str, file, from_name: str = ""):
+    """
+    Gửi ảnh qua TextNow API dùng multipart/form-data.
+    Cùng endpoint với send_textnow_message nhưng kèm file thay vì JSON.
+    """
+    proxy_us = get_proxy()
+    has_proxy = bool(re.search(r'--proxy', message_curl or '', re.IGNORECASE))
+    if has_proxy:
+        message_curl = replace_proxy(message_curl, proxy_us)
+
+    parsed = parse_curl(message_curl)
+    msg_url = parsed.get("url", "")
+    headers = dict(parsed.get("headers", {}))
+    headers.pop("Host", None)
+    headers.pop("Content-Type", None)  # requests tự set khi dùng multipart
+
+    if not from_name:
+        raw_data = parsed.get("data", "") or ""
+        try:
+            original_body = json.loads(raw_data)
+            from_name = original_body.get("from_name", "")
+        except Exception:
+            from_name = ""
+
+    contact_value = to_number if to_number.startswith("+") else "+" + to_number
+
+    form_data = {
+        "contact_type": "2",
+        "contact_value": contact_value,
+        "to_name": "",
+        "message": "",
+        "from_name": from_name,
+    }
+
+    mime_type = getattr(file, "content_type", None) or "image/jpeg"
+    filename = getattr(file, "name", "image.jpg") or "image.jpg"
+    files = {"attach": (filename, file.file, mime_type)}
+
+    logger.info(f"send_textnow_media to: {contact_value}, file: {filename}")
+    proxy_cfg = {"http": proxy_us, "https": proxy_us}
+
+    try:
+        resp = requests.post(msg_url, headers=headers, data=form_data, files=files, proxies=proxy_cfg, timeout=60)
+    except requests.RequestException as e:
+        return {"status": "error", "message": f"network_error: {str(e)}"}
+
+    try:
+        result = resp.json()
+    except Exception:
+        result = resp.text
+
+    logger.info(f"send_textnow_media response [{resp.status_code}]: {result}")
+
+    if resp.status_code >= 400:
+        return {
+            "status": "error",
+            "status_code": resp.status_code,
+            "message": f"HTTP Error {resp.status_code}",
+            "response": result,
+        }
+
+    return {
+        "status": "success",
+        "status_code": resp.status_code,
+        "response": result,
+        "message": "Media sent successfully.",
     }
 
 
