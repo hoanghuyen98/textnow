@@ -8,7 +8,8 @@ import time
 from bs4 import BeautifulSoup
 from django.db.models import Q
 import os
-from .utils import extract_auth_code, parse_mail_date 
+from datetime import datetime, timezone as dt_timezone
+from .utils import extract_auth_code, parse_mail_date, extract_verify_link
 load_dotenv()
 
 DONGVAN_KEY = os.environ.get('DONGVAN_KEY')
@@ -892,3 +893,58 @@ def get_auth_code(email: str, refresh_token: str, client_id: str, provider: str)
         }
     else:
         return {"status": "error", "message": f"Dịch vụ không hỗ trợ ."}
+
+
+def get_verify_link(email: str, refresh_token: str, client_id: str):
+    """
+    Gọi API graph_messages để lấy link verify email TextNow từ hộp thư Hotmail.
+    Trả về link mới nhất có chứa clicks.textnow.com hoặc 'verify your email so we can make it official'.
+    """
+    def _parse_date(date_str):
+        try:
+            return datetime.fromisoformat(date_str.replace("Z", "+00:00"))
+        except Exception:
+            try:
+                return datetime.strptime(date_str, "%Y-%m-%dT%H:%M:%S.%fZ").replace(tzinfo=dt_timezone.utc)
+            except Exception:
+                return datetime.min.replace(tzinfo=dt_timezone.utc)
+
+    url = "https://tools.dongvanfb.net/api/graph_messages"
+    payload = {
+        "email": email.strip(),
+        "refresh_token": refresh_token.strip(),
+        "client_id": client_id.strip(),
+        "list_mail": "all",
+    }
+
+    try:
+        resp = requests.post(url, json=payload, timeout=20)
+        data = resp.json()
+    except Exception as e:
+        logger.error(f"Lỗi get_verify_link ({email}): {e}")
+        return {"status": "error", "message": "Lỗi kết nối API lấy link verify."}
+
+    messages = data.get("messages", []) or []
+    if not messages:
+        return {"status": "error", "message": f"Không có email nào trong hộp thư {email}."}
+
+    candidates = []
+    for m in messages:
+        link = extract_verify_link(m.get("message", ""))
+        if link:
+            candidates.append({
+                "date": m.get("date", ""),
+                "link": link,
+                "subject": m.get("subject", ""),
+            })
+
+    if not candidates:
+        return {"status": "error", "message": f"Không tìm thấy link verify trong hộp thư {email}."}
+
+    latest = max(candidates, key=lambda x: _parse_date(x["date"]))
+    return {
+        "status": "success",
+        "verify_link": latest["link"],
+        "date": latest["date"],
+        "subject": latest["subject"],
+    }

@@ -23,7 +23,11 @@ task_logger = logging.getLogger("task_error")
 @shared_task
 def check_single_phone(phone_id):
     time.sleep(5)
-    phone = PhoneAccount.objects.get(id=phone_id)
+    try:
+        phone = PhoneAccount.objects.get(id=phone_id)
+    except PhoneAccount.DoesNotExist:
+        logger.warning(f"[check_single_phone] PhoneAccount id={phone_id} không tồn tại, bỏ qua.")
+        return {"phone_id": phone_id, "status": "skipped", "message": "Phone không tồn tại"}
 
     is_textnow = (phone.provider or "").lower() == "textnow"
     if is_textnow:
@@ -87,17 +91,6 @@ def check_phone_all_batches():
 
     return {"task_group_id": result.id, "total": len(phone_ids)}
 
-@shared_task
-def check_all_batches():
-    logger.info("🔥 Task check_all_batches đang chạy...")
-    # ví dụ logic thật của bạn
-    return {"result": "OK"}
-
-@shared_task
-def check_celery():
-    logger.info("🔥 Task check_all_batches đang chạy...")
-    # ví dụ logic thật của bạn
-    return {"result": "OK"}
 
 @shared_task()
 def bulk_reset_password_task(customer_names, history_id=None):

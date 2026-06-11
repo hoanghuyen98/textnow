@@ -84,6 +84,50 @@ def normalize_phone_number(raw_number: str):
 
     return digits, name
 
+_TEXTNOW_VERIFY_LINK_RE = re.compile(r'https://clicks\.textnow\.com/[^\s"\'<>&]+')
+_VERIFY_EMAIL_TEXT_RE = re.compile(r'verify your email so we can make it official', re.IGNORECASE)
+
+def extract_verify_link(html_content: str) -> str:
+    """
+    Tìm link verify email TextNow từ HTML content.
+    - Ưu tiên tìm <a> có text 'Verify My Email' hoặc chứa 'verify' + 'email'
+    - Fallback: <a> có href clicks.textnow.com mà không chỉ chứa ảnh (logo)
+    - Last resort: regex lấy link clicks.textnow.com đầu tiên
+    """
+    if not html_content:
+        return ""
+
+    try:
+        soup = BeautifulSoup(html_content, "html.parser")
+        # Ưu tiên 1: <a> có text chứa "verify" và "email" (nút "Verify My Email")
+        for a in soup.find_all("a", href=True):
+            href = a.get("href", "")
+            if not href.startswith("http"):
+                continue
+            text = a.get_text(separator=" ", strip=True).lower()
+            if "verify" in text and "email" in text:
+                return href
+
+        # Ưu tiên 2: <a> href clicks.textnow.com nhưng không phải link ảnh thuần (logo)
+        for a in soup.find_all("a", href=True):
+            href = a.get("href", "")
+            if not href.startswith("http") or "clicks.textnow.com" not in href.lower():
+                continue
+            # Bỏ qua <a> chỉ chứa <img> mà không có text (link logo/banner)
+            if a.find("img") and not a.get_text(strip=True):
+                continue
+            return href
+    except Exception:
+        pass
+
+    # Last resort: regex lấy link clicks.textnow.com đầu tiên
+    match = _TEXTNOW_VERIFY_LINK_RE.search(html_content)
+    if match:
+        return match.group(0)
+
+    return ""
+
+
 def extract_auth_code(html_content: str) -> str | None:
     """
     Trích mã xác minh (4–8 chữ số) từ nội dung HTML email.

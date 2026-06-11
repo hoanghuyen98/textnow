@@ -49,6 +49,7 @@ urlpatterns = [
     
     path("buy_mail/", views.BuyMailView.as_view(), name="buy_mail"),
     path("get_auth_code/", views.GetAuthCodeView.as_view(), name="get_auth_code"),
+    path("get_verify_link/", views.GetVerifyLinkView.as_view(), name="get_verify_link"),
     path("purchased_mails/", views.ListPurchasedMailsView.as_view(), name="purchased_mails"),
     path("save_apple_mail/", views.SaveAppleMailView.as_view(), name="save_apple_mail"),
     path("save_textnow/", views.SaveTextNowAccountView.as_view(), name="save_textnow"),

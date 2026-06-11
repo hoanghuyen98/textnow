@@ -27,12 +27,12 @@ from rest_framework.views import APIView
 from django.db import IntegrityError
 from rest_framework_simplejwt.tokens import RefreshToken
 from django.utils import timezone
-from .service import fetch_categories, buy_mail_dongvan, get_auth_code, buy_mail_muaview, buy_mail_shopgmail, buy_mail_muaview_that, buy_mail_gmail94, buy_mail_tmail12
+from .service import fetch_categories, buy_mail_dongvan, get_auth_code, buy_mail_muaview, buy_mail_shopgmail, buy_mail_muaview_that, buy_mail_gmail94, buy_mail_tmail12, get_verify_link
 from functools import wraps
 from drf_yasg.utils import swagger_auto_schema
 from django.db import transaction
 from datetime import datetime, date
-from .tasks import check_phone_all_batches, bulk_reset_password_task, check_celery, process_phoneaccount_background, revoke_phone_account_task
+from .tasks import check_phone_all_batches, bulk_reset_password_task, process_phoneaccount_background, revoke_phone_account_task
 from rest_framework.throttling import ScopedRateThrottle
 from drf_yasg import openapi
 from .response_messages import PHONE_MESSAGES, INBOX_MESSAGES, SEND_MESSAGE_MESSAGES, SEND_MEDIA_MESSAGES
@@ -1466,6 +1466,47 @@ class GetAuthCodeView(APIView):
         return Response(result, status=status.HTTP_200_OK)
 
 
+class GetVerifyLinkView(APIView):
+    """
+    POST: Lấy link verify email TextNow từ hộp thư Hotmail qua graph_messages API.
+    Body: { "email": "example@hotmail.com" }
+    """
+    permission_classes = [permissions.IsAuthenticated, RoleRequiredPermission]
+    allowed_roles = ["staff", "admin"]
+    throttle_classes = [ScopedRateThrottle]
+    throttle_scope = 'heavy'
+
+    def post(self, request):
+        email = request.data.get("email")
+        if not email:
+            return Response(
+                {"status": "error", "message": "Thiếu trường 'email'."},
+                status=status.HTTP_400_BAD_REQUEST
+            )
+
+        mail_obj = PurchasedMail.objects.filter(email__iexact=email.strip()).first()
+        if not mail_obj:
+            return Response(
+                {"status": "error", "message": f"Không tìm thấy mail '{email}' trong hệ thống."},
+                status=status.HTTP_404_NOT_FOUND
+            )
+
+        try:
+            result = get_verify_link(
+                email=mail_obj.email,
+                refresh_token=mail_obj.refresh_token or "",
+                client_id=mail_obj.client_id or "",
+            )
+        except Exception as e:
+            logger.error(f"Lỗi khi gọi get_verify_link: {str(e)}")
+            return Response(
+                {"status": "error", "message": "Lỗi khi lấy link verify."},
+                status=status.HTTP_500_INTERNAL_SERVER_ERROR
+            )
+
+        return Response(result, status=status.HTTP_200_OK)
+
+
 class ListPurchasedMailsView(APIView):
     """
     ✅ API: Lấy danh sách tất cả mail mà nhân viên hiện tại đã mua.
@@ -1672,9 +1713,9 @@ class EmployeePhoneSummaryView(APIView):
         first_day_of_month = today.replace(day=1)
 
         try:
-            # ---- Thống kê số điện thoại Pinger ----
+            # ---- Thống kê số điện thoại TextNow ----
             pinger_today_qs = PhoneAccount.objects.filter(
-                provider="Pinger/Textfree",
+                provider="textnow",
                 creator=employee,
                 created_at__date=today
             )
@@ -1683,9 +1724,9 @@ class EmployeePhoneSummaryView(APIView):
             pinger_today_die = pinger_today_qs.filter(
                 Q(status="die") | Q(status="die_use") | Q(status="lock")
             ).count()
-            
+
             pinger_month = PhoneAccount.objects.filter(
-                provider="Pinger/Textfree",
+                provider="textnow",
                 creator=employee,
                 created_at__date__gte=first_day_of_month
             ).count()

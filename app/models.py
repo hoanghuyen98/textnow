@@ -162,7 +162,7 @@ class PhoneAccount(models.Model):
     name = models.CharField(max_length=20, null=True)
     phone = models.CharField(max_length=20, unique=True, db_index=True)
     mail = models.EmailField(blank=True, null=True)
-    provider = models.CharField(max_length=30, default="Pinger/Textfree")
+    provider = models.CharField(max_length=30, default="textnow")
     status = models.CharField(max_length=10, choices=STATUS_CHOICES, default="live")
     is_used = models.BooleanField(default=False)
     # --- Lưu nội dung curl ---
